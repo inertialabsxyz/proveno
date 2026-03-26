@@ -130,17 +130,19 @@ pub fn compile_and_verify(source: &str) -> Result<CompiledProgram, PipelineError
 }
 
 /// Execute a compiled program with the given host and config.
+/// Returns both the VM output and the host (so callers can recover host state, e.g. TLS attestations).
 pub fn execute<H: HostInterface>(
     program: &CompiledProgram,
     input: LuaValue,
     config: VmConfig,
     host: H,
-) -> Result<VmOutput, PipelineError> {
+) -> Result<(VmOutput, H), PipelineError> {
     let mut vm = Vm::new(config, host);
-    vm.execute(program, input).map_err(|e| {
+    let output = vm.execute(program, input).map_err(|e| {
         let msg = format_vm_error(&e);
         PipelineError::Runtime(msg, e)
-    })
+    })?;
+    Ok((output, vm.into_host()))
 }
 
 /// Format a VmError into a human-readable string for LLM feedback.
@@ -304,7 +306,7 @@ return r.message"#;
     #[test]
     fn execute_simple_return() {
         let program = compile_and_verify("return 42").unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(output.return_value, LuaValue::Integer(42));
     }
 
@@ -314,7 +316,7 @@ return r.message"#;
 log("world")
 return 0"#)
             .unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(output.logs, vec!["hello", "world"]);
     }
 
@@ -323,7 +325,7 @@ return 0"#)
         let source = r#"local r = tool.call("echo", {message = "test"})
 return r.message"#;
         let program = compile_and_verify(source).unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(
             output.return_value,
             LuaValue::String(luai::types::value::LuaString::from_str("test"))
@@ -337,7 +339,7 @@ return r.message"#;
         let source = r#"local r = tool.call("add", {a = 10, b = 32})
 return r.result"#;
         let program = compile_and_verify(source).unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(output.return_value, LuaValue::Integer(42));
     }
 
@@ -346,7 +348,7 @@ return r.result"#;
         let source = r#"local r = tool.call("upper", {text = "hello"})
 return r.result"#;
         let program = compile_and_verify(source).unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(
             output.return_value,
             LuaValue::String(luai::types::value::LuaString::from_str("HELLO"))
@@ -358,7 +360,7 @@ return r.result"#;
         let source = r#"local r = tool.call("time_now", {})
 return r.timestamp"#;
         let program = compile_and_verify(source).unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(output.return_value, LuaValue::Integer(1709654400));
     }
 
@@ -366,7 +368,7 @@ return r.timestamp"#;
     fn execute_unknown_tool_error() {
         let source = r#"tool.call("nonexistent", {})"#;
         let program = compile_and_verify(source).unwrap();
-        let err = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap_err();
+        let err = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).map(|(o, _)| o).unwrap_err();
         assert!(matches!(err, PipelineError::Runtime(_, _)));
         assert!(err.to_string().contains("Tool error"));
     }
@@ -389,7 +391,7 @@ local r2 = tool.call("add", {a = 3, b = 4})
 return r1.result + r2.result
 "#;
         let program = compile_and_verify(source).unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(output.return_value, LuaValue::Integer(10));
         assert_eq!(output.transcript.len(), 2);
     }
@@ -487,7 +489,7 @@ return r1.result + r2.result
     #[test]
     fn format_output_simple() {
         let program = compile_and_verify("return 42").unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let result = make_result("return 42", output, 1);
         let formatted = format_output(&result);
         assert!(formatted.contains("luai execution report"));
@@ -515,7 +517,7 @@ return r1.result + r2.result
 local r = tool.call("echo", {message = "hi"})
 return 0"#;
         let program = compile_and_verify(source).unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let result = make_result(source, output, 2);
         let formatted = format_output(&result);
         assert!(formatted.contains("Attempts: 2"));
@@ -529,7 +531,7 @@ return 0"#;
     #[test]
     fn format_output_resource_limits() {
         let program = compile_and_verify("return 1").unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let result = make_result("return 1", output, 1);
         let formatted = format_output(&result);
         // Should show used / limit format
@@ -542,8 +544,8 @@ return 0"#;
     #[test]
     fn hashes_deterministic() {
         let program = compile_and_verify("return 42").unwrap();
-        let output1 = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
-        let output2 = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output1, _) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output2, _) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let r1 = make_result("return 42", output1, 1);
         let r2 = make_result("return 42", output2, 1);
         let h1 = compute_hashes(&r1);
@@ -557,8 +559,8 @@ return 0"#;
     fn hashes_differ_for_different_source() {
         let p1 = compile_and_verify("return 42").unwrap();
         let p2 = compile_and_verify("return 99").unwrap();
-        let o1 = execute(&p1, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
-        let o2 = execute(&p2, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (o1, _) = execute(&p1, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (o2, _) = execute(&p2, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let r1 = make_result("return 42", o1, 1);
         let r2 = make_result("return 99", o2, 1);
         let h1 = compute_hashes(&r1);
@@ -574,8 +576,8 @@ return 0"#;
 return 1"#;
         let p1 = compile_and_verify(src_no_tool).unwrap();
         let p2 = compile_and_verify(src_tool).unwrap();
-        let o1 = execute(&p1, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
-        let o2 = execute(&p2, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (o1, _) = execute(&p1, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (o2, _) = execute(&p2, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let r1 = make_result(src_no_tool, o1, 1);
         let r2 = make_result(src_tool, o2, 1);
         let h1 = compute_hashes(&r1);
@@ -588,7 +590,7 @@ return 1"#;
     #[test]
     fn hash_format_starts_with_sha256() {
         let program = compile_and_verify("return 1").unwrap();
-        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let (output, _host) = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let result = make_result("return 1", output, 1);
         let hashes = compute_hashes(&result);
         assert!(hashes.program_hash.starts_with("sha256:"));
@@ -656,7 +658,7 @@ local time_string = string.format("%04d-%02d-%02d %02d:%02d:%02d UTC",
 return time_string
 "#;
         let program = compile_and_verify(source).unwrap();
-        let result = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost);
+        let result = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).map(|(o, _)| o);
         assert!(result.is_err(), "should return error for unsupported format specifier");
     }
 }

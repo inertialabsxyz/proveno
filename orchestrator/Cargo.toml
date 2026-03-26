@@ -8,13 +8,16 @@ luai = { path = "..", features = ["serde", "std", "zkvm"] }
 luai_prover = { path = "../prover" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls-manual-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+webpki-roots = "0.26"
 clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
 dotenvy = "0.15"
 
 [dev-dependencies]
 tempfile = "3"
+p256 = { version = "0.13", features = ["ecdsa"] }
 
 [[bin]]
 name = "luai-orchestrator"

@@ -14,7 +14,11 @@ use sha2::{Digest, Sha256};
 use alloc::{borrow::ToOwned, format, string::{String, ToString}, vec::Vec};
 
 use crate::{
-    host::{canonicalize::canonical_deserialize, transcript::ToolCallRecord},
+    host::{
+        canonicalize::canonical_deserialize,
+        tls_attestation::{TlsAttestation, tls_attestations_hash},
+        transcript::ToolCallRecord,
+    },
     types::{table::LuaTable, value::LuaValue},
     vm::engine::HostInterface,
 };
@@ -26,8 +30,13 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TapeEntry {
-    /// Successful tool response: canonical JSON bytes of the response table.
-    Ok(Vec<u8>),
+    /// Successful tool response with optional TLS attestation.
+    Ok {
+        /// Canonical JSON bytes of the response table.
+        response: Vec<u8>,
+        /// TLS attestation data captured during the HTTP request (if available).
+        tls_attestation: Option<TlsAttestation>,
+    },
     /// Failed tool response: the error message string.
     Err(String),
 }
@@ -50,13 +59,29 @@ impl OracleTape {
     }
 
     /// Build an `OracleTape` from a slice of `ToolCallRecord`s (e.g. from
-    /// `Transcript::records()`).
+    /// `Transcript::records()`). No TLS attestation data is attached.
     pub fn from_records(records: &[ToolCallRecord]) -> Self {
+        Self::from_records_with_tls(records, &[])
+    }
+
+    /// Build an `OracleTape` from transcript records and optional TLS attestations.
+    ///
+    /// `tls_attestations` must be the same length as `records`, or empty
+    /// (in which case all entries get `None` attestation).
+    pub fn from_records_with_tls(
+        records: &[ToolCallRecord],
+        tls_attestations: &[Option<TlsAttestation>],
+    ) -> Self {
         let entries = records
             .iter()
-            .map(|r| {
+            .enumerate()
+            .map(|(i, r)| {
                 if r.error_message.is_empty() {
-                    TapeEntry::Ok(r.response_canonical.clone())
+                    let tls = tls_attestations.get(i).cloned().flatten();
+                    TapeEntry::Ok {
+                        response: r.response_canonical.clone(),
+                        tls_attestation: tls,
+                    }
                 } else {
                     TapeEntry::Err(r.error_message.clone())
                 }
@@ -71,14 +96,24 @@ impl OracleTape {
     /// - 1 byte tag: `0x00` = Ok, `0x01` = Err
     /// - 4-byte little-endian length of payload
     /// - payload bytes
+    /// - (Ok only) 1-byte TLS tag: `0x00` = no attestation, `0x01` = has attestation
+    ///   followed by the attestation's commitment hash if present
     pub fn commitment_hash(&self) -> [u8; 32] {
         let mut h = Sha256::new();
         for entry in &self.entries {
             match entry {
-                TapeEntry::Ok(bytes) => {
+                TapeEntry::Ok { response, tls_attestation } => {
                     h.update([0x00u8]);
-                    h.update((bytes.len() as u32).to_le_bytes());
-                    h.update(bytes);
+                    h.update((response.len() as u32).to_le_bytes());
+                    h.update(response);
+                    match tls_attestation {
+                        None => h.update([0x00u8]),
+                        Some(att) => {
+                            h.update([0x01u8]);
+                            let att_hash = tls_attestations_hash(&[Some(att.clone())]);
+                            h.update(att_hash);
+                        }
+                    }
                 }
                 TapeEntry::Err(msg) => {
                     let msg_bytes = msg.as_bytes();
@@ -110,8 +145,8 @@ impl OracleTape {
 /// A `HostInterface` that replays responses from an `OracleTape`.
 ///
 /// Each call to `call_tool` consumes the next entry from the tape:
-/// - `TapeEntry::Ok(bytes)` — deserializes the JSON bytes back into a
-///   `LuaTable` and returns `Ok(table)`.
+/// - `TapeEntry::Ok { response, .. }` — deserializes the JSON bytes back
+///   into a `LuaTable` and returns `Ok(table)`.
 /// - `TapeEntry::Err(msg)` — returns `Err(msg)`.
 ///
 /// If the tape is exhausted (more calls than entries), an error is returned.
@@ -145,8 +180,8 @@ impl HostInterface for TapeHost {
         self.cursor += 1;
 
         match entry {
-            TapeEntry::Ok(bytes) => {
-                let value = canonical_deserialize(bytes)
+            TapeEntry::Ok { response, .. } => {
+                let value = canonical_deserialize(response)
                     .map_err(|e| format!("tape decode error: {e:?}"))?;
                 match value {
                     LuaValue::Table(t) => Ok(t.borrow().clone()),
@@ -215,7 +250,13 @@ mod tests {
         let r = ok_record(0, b"{\"x\":1}");
         let tape = OracleTape::from_records(&[r]);
         assert_eq!(tape.len(), 1);
-        assert_eq!(tape.entries[0], TapeEntry::Ok(b"{\"x\":1}".to_vec()));
+        assert_eq!(
+            tape.entries[0],
+            TapeEntry::Ok {
+                response: b"{\"x\":1}".to_vec(),
+                tls_attestation: None,
+            }
+        );
     }
 
     #[test]
@@ -235,9 +276,9 @@ mod tests {
         ];
         let tape = OracleTape::from_records(&records);
         assert_eq!(tape.len(), 3);
-        assert!(matches!(&tape.entries[0], TapeEntry::Ok(_)));
+        assert!(matches!(&tape.entries[0], TapeEntry::Ok { .. }));
         assert!(matches!(&tape.entries[1], TapeEntry::Err(_)));
-        assert!(matches!(&tape.entries[2], TapeEntry::Ok(_)));
+        assert!(matches!(&tape.entries[2], TapeEntry::Ok { .. }));
     }
 
     // ── OracleTape::commitment_hash ───────────────────────────────────────────

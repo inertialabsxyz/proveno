@@ -40,6 +40,11 @@ impl<H: HostInterface> ToolRegistry<H> {
         self.total_bytes_out = 0;
     }
 
+    /// Consume the registry and return the underlying host.
+    pub fn into_host(self) -> H {
+        self.host
+    }
+
     /// Attempt a tool call, enforcing quotas, recording the transcript entry,
     /// and charging gas via the gas meter.
     ///

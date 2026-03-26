@@ -11,12 +11,16 @@
 use sha2::{Digest, Sha256};
 
 use crate::{
-    host::{canonicalize::canonical_serialize, tape::OracleTape},
+    host::{
+        canonicalize::canonical_serialize,
+        tape::{OracleTape, TapeEntry},
+        tls_attestation::tls_attestations_hash,
+    },
     types::value::LuaValue,
     vm::engine::VmOutput,
 };
 
-/// The four public commitments attested by a zkVM proof.
+/// The five public commitments attested by a zkVM proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PublicInputs {
@@ -32,6 +36,10 @@ pub struct PublicInputs {
 
     /// SHA-256 over `return_value || length-prefixed logs || transcript entries`.
     pub output_hash: [u8; 32],
+
+    /// SHA-256 commitment over TLS attestation data for all tool calls.
+    /// `[0u8; 32]` (SHA-256 of empty input) when no TLS attestations are present.
+    pub tls_attestation_hash: [u8; 32],
 }
 
 /// Compute the `input_hash` for a given `LuaValue`.
@@ -89,21 +97,29 @@ pub fn compute_public_inputs(
     oracle_tape: &OracleTape,
     output: &VmOutput,
 ) -> PublicInputs {
+    // Extract TLS attestations from tape entries for commitment
+    let tls_attestations: Vec<_> = oracle_tape
+        .entries
+        .iter()
+        .map(|e| match e {
+            TapeEntry::Ok { tls_attestation, .. } => tls_attestation.clone(),
+            TapeEntry::Err(_) => None,
+        })
+        .collect();
+
     PublicInputs {
         program_hash,
         input_hash: hash_input(input_value),
         tool_responses_hash: oracle_tape.commitment_hash(),
         output_hash: hash_output(output),
+        tls_attestation_hash: tls_attestations_hash(&tls_attestations),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        host::{tape::TapeEntry, transcript::ToolCallRecord},
-        types::value::LuaString,
-    };
+    use crate::host::tls_attestation::tls_attestations_hash;
 
     fn make_output(ret: LuaValue) -> VmOutput {
         VmOutput {
@@ -165,5 +181,7 @@ mod tests {
         assert_eq!(pi.input_hash, hash_input(&input));
         assert_eq!(pi.tool_responses_hash, tape.commitment_hash());
         assert_eq!(pi.output_hash, hash_output(&output));
+        // Empty tape → tls_attestation_hash is hash of empty input
+        assert_eq!(pi.tls_attestation_hash, tls_attestations_hash(&[]));
     }
 }

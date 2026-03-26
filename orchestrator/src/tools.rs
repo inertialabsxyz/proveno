@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use luai::{
+    host::tls_attestation::TlsAttestation,
     types::{
         table::{LuaKey, LuaTable},
         value::{LuaString, LuaValue},
@@ -10,6 +11,7 @@ use luai::{
 };
 
 use crate::llm::LlmClient;
+use crate::tls_capture::{TlsCaptureStore, build_capturing_client};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,7 @@ fn get_opt_str(args: &LuaTable, key: &str) -> Option<String> {
 // ── StubHost (kept for testing) ──────────────────────────────────────────────
 
 #[cfg(test)]
+#[derive(Debug)]
 pub struct StubHost;
 
 #[cfg(test)]
@@ -96,19 +99,26 @@ pub struct LiveHost {
     http: reqwest::blocking::Client,
     kv: HashMap<String, String>,
     llm: LlmClient,
+    tls_store: TlsCaptureStore,
+    tls_attestations: Vec<Option<TlsAttestation>>,
 }
 
 impl LiveHost {
     pub fn new(llm: LlmClient) -> Self {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
-            .build()
-            .expect("failed to build HTTP client");
+        let tls_store = TlsCaptureStore::new();
+        let http = build_capturing_client(tls_store.clone(), HTTP_TIMEOUT_SECS);
         LiveHost {
             http,
             kv: HashMap::new(),
             llm,
+            tls_store,
+            tls_attestations: Vec::new(),
         }
+    }
+
+    /// Consume the host and return captured TLS attestations (one per tool call).
+    pub fn into_tls_attestations(self) -> Vec<Option<TlsAttestation>> {
+        self.tls_attestations
     }
 
     fn tool_http_get(&self, args: &LuaTable) -> Result<LuaTable, String> {
@@ -242,7 +252,9 @@ impl LiveHost {
 
 impl HostInterface for LiveHost {
     fn call_tool(&mut self, name: &str, args: &LuaTable) -> Result<LuaTable, String> {
-        match name {
+        let is_http = matches!(name, "http_get" | "http_post");
+
+        let result = match name {
             "http_get" => self.tool_http_get(args),
             "http_post" => self.tool_http_post(args),
             "kv_get" => self.tool_kv_get(args),
@@ -250,7 +262,16 @@ impl HostInterface for LiveHost {
             "llm_query" => self.tool_llm_query(args),
             "time_now" => self.tool_time_now(),
             other => Err(format!("unknown tool '{other}'")),
+        };
+
+        // Capture TLS attestation for HTTP calls, None for everything else
+        if is_http {
+            self.tls_attestations.push(self.tls_store.take_last());
+        } else {
+            self.tls_attestations.push(None);
         }
+
+        result
     }
 }
 
@@ -640,6 +661,187 @@ mod tests {
             assert!(!desc.name.is_empty());
             assert!(!desc.description.is_empty());
         }
+    }
+
+    // ── TLS attestation capture ──────────────────────────────────────
+
+    #[test]
+    fn tls_attestation_captured_for_https() {
+        // Use cloudflare.com which serves P-256 ECDSA certs
+        let mut host = make_live_host();
+        let args = make_args(&[(
+            "url",
+            LuaValue::String(LuaString::from_str("https://one.one.one.one/")),
+        )]);
+        let _result = host.call_tool("http_get", &args).unwrap();
+
+        // Verify TLS attestation was captured
+        let attestations = host.into_tls_attestations();
+        assert_eq!(attestations.len(), 1);
+        let att = attestations[0].as_ref().expect("expected TLS attestation for P-256 HTTPS call");
+
+        assert_eq!(att.hostname, "one.one.one.one");
+        assert!(!att.cert_chain.is_empty(), "cert chain should not be empty");
+        assert!(!att.signature.is_empty(), "signature should not be empty");
+        // signed_message should be at least 98 bytes (64 + 34 prefix) plus the transcript hash
+        assert!(att.signed_message.len() >= 98, "signed_message should contain prefix + transcript hash");
+    }
+
+    #[test]
+    fn tls_attestation_none_for_non_http_tools() {
+        let mut host = make_live_host();
+
+        // kv_set is not an HTTP tool
+        let args = make_args(&[
+            ("key", LuaValue::String(LuaString::from_str("k"))),
+            ("value", LuaValue::String(LuaString::from_str("v"))),
+        ]);
+        host.call_tool("kv_set", &args).unwrap();
+
+        let attestations = host.into_tls_attestations();
+        assert_eq!(attestations.len(), 1);
+        assert!(attestations[0].is_none(), "non-HTTP tools should have no TLS attestation");
+    }
+
+    #[test]
+    fn tls_attestation_e2e_with_proof_artifacts() {
+        use crate::{pipeline, prove};
+        use luai::host::tls_attestation::tls_attestations_hash;
+
+        let source = r#"
+local resp = tool.call("http_get", {url = "https://one.one.one.one/"})
+return resp.status
+"#;
+        let program = pipeline::compile_and_verify(source).unwrap();
+        let host = make_live_host();
+        let (output, host) = pipeline::execute(
+            &program,
+            LuaValue::Nil,
+            luai::vm::engine::VmConfig::default(),
+            host,
+        )
+        .unwrap();
+
+        let tls_attestations = host.into_tls_attestations();
+        assert_eq!(tls_attestations.len(), 1);
+        assert!(tls_attestations[0].is_some());
+
+        // Build proof artifacts and verify TLS attestation hash is non-zero
+        let dir = tempfile::tempdir().unwrap();
+        let artifacts = prove::build_proof_artifacts(
+            &program,
+            &LuaValue::Nil,
+            output,
+            dir.path().to_str().unwrap(),
+            tls_attestations.clone(),
+        )
+        .unwrap();
+
+        let zero_hash = [0u8; 32];
+        assert_ne!(
+            artifacts.public_inputs.tls_attestation_hash, zero_hash,
+            "tls_attestation_hash should be non-zero for HTTPS calls"
+        );
+
+        // Verify the hash matches what we'd compute directly
+        let expected_hash = tls_attestations_hash(&tls_attestations);
+        assert_eq!(artifacts.public_inputs.tls_attestation_hash, expected_hash);
+    }
+
+    #[test]
+    fn tls_attestation_ecdsa_verifies_with_p256_crate() {
+        use luai::zkvm::der_parser;
+        use p256::ecdsa::{
+            signature::Verifier,
+            Signature, VerifyingKey,
+        };
+
+        let mut host = make_live_host();
+        let args = make_args(&[(
+            "url",
+            LuaValue::String(LuaString::from_str("https://one.one.one.one/")),
+        )]);
+        host.call_tool("http_get", &args).unwrap();
+
+        let attestations = host.into_tls_attestations();
+        let att = attestations[0].as_ref().expect("expected TLS attestation");
+
+        // Extract pubkey from leaf cert (which is now the signing cert from verify_tls13_signature)
+        let pubkey_bytes = der_parser::extract_p256_pubkey(&att.cert_chain[0].0).unwrap();
+        let vk = VerifyingKey::from_sec1_bytes(&pubkey_bytes).expect("valid P-256 pubkey");
+
+        // Parse the DER-encoded ECDSA signature
+        let sig = Signature::from_der(&att.signature).expect("valid DER ECDSA signature");
+
+        // Use the full signed_message directly (captured from TLS handshake).
+        // p256 crate's verify() does SHA-256 internally (ecdsa_secp256r1_sha256).
+        let result = vk.verify(&att.signed_message, &sig);
+
+        if result.is_err() {
+            eprintln!("=== ECDSA VERIFY DEBUG ===");
+            eprintln!("cert chain len: {}", att.cert_chain.len());
+            eprintln!("leaf cert len: {}", att.cert_chain[0].0.len());
+            eprintln!("signed_message ({} bytes)", att.signed_message.len());
+            eprintln!("signature len: {}", att.signature.len());
+            eprintln!("pubkey: {:02x?}", &pubkey_bytes);
+            eprintln!("hostname: {}", att.hostname);
+        }
+
+        assert!(result.is_ok(), "ECDSA verification failed: {:?}", result.err());
+    }
+
+    /// Test that replicates exactly what the zkVM guest does:
+    /// 1. Call verify_tls_attestation to get EcdsaVerifyTask
+    /// 2. Verify with prehashed digest using p256 crate
+    #[test]
+    fn tls_attestation_guest_path_verifies() {
+        use luai::zkvm::tls_verify::verify_tls_attestation;
+        use p256::ecdsa::{
+            signature::hazmat::PrehashVerifier,
+            Signature, VerifyingKey,
+        };
+        use sha2::{Digest, Sha256};
+
+        let mut host = make_live_host();
+        let args = make_args(&[(
+            "url",
+            LuaValue::String(LuaString::from_str("https://one.one.one.one/")),
+        )]);
+        host.call_tool("http_get", &args).unwrap();
+
+        let attestations = host.into_tls_attestations();
+        let att = attestations[0].as_ref().expect("expected TLS attestation");
+
+        // This is exactly what verify_tls_attestation does
+        let tasks = verify_tls_attestation(att).expect("TLS attestation verification failed");
+        assert_eq!(tasks.len(), 1);
+        let task = &tasks[0];
+
+        // Reconstruct what the guest does in main.rs
+        let vk = VerifyingKey::from_sec1_bytes(&task.pubkey).expect("valid P-256 pubkey");
+
+        // Reconstruct the 64-byte r||s signature
+        let mut sig_bytes = [0u8; 64];
+        sig_bytes[..32].copy_from_slice(&task.sig_r);
+        sig_bytes[32..].copy_from_slice(&task.sig_s);
+        let sig = Signature::from_bytes((&sig_bytes).into()).expect("valid signature");
+
+        // task.message_hash is SHA256(signed_message) — this is the prehash
+        let result = vk.verify_prehash(&task.message_hash, &sig);
+
+        if result.is_err() {
+            // Debug: also verify with the raw signed_message to confirm it's the hash that's wrong
+            eprintln!("=== GUEST PATH DEBUG ===");
+            eprintln!("message_hash: {:02x?}", &task.message_hash);
+            let recomputed: [u8; 32] = Sha256::digest(&att.signed_message).into();
+            eprintln!("recomputed hash: {:02x?}", &recomputed);
+            eprintln!("hashes match: {}", task.message_hash == recomputed);
+            eprintln!("sig_r: {:02x?}", &task.sig_r);
+            eprintln!("sig_s: {:02x?}", &task.sig_s);
+            eprintln!("pubkey: {:02x?}", &task.pubkey);
+        }
+
+        assert!(result.is_ok(), "Guest-path ECDSA prehash verification failed: {:?}", result.err());
     }
 }
 

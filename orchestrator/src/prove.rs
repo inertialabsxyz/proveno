@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use luai::{
     compiler::proto::CompiledProgram,
-    host::tape::OracleTape,
+    host::{tape::OracleTape, tls_attestation::TlsAttestation},
     types::value::LuaValue,
     vm::engine::VmOutput,
     zkvm::commitment::{PublicInputs, compute_public_inputs},
@@ -26,9 +26,10 @@ pub fn build_proof_artifacts(
     input: &LuaValue,
     output: VmOutput,
     output_dir: &str,
+    tls_attestations: Vec<Option<TlsAttestation>>,
 ) -> Result<ProveArtifacts, String> {
-    // Build oracle tape from transcript
-    let oracle_tape = OracleTape::from_records(&output.transcript);
+    // Build oracle tape from transcript, including TLS attestation data
+    let oracle_tape = OracleTape::from_records_with_tls(&output.transcript, &tls_attestations);
 
     // Compute public inputs (the 4 commitment hashes)
     let public_inputs =
@@ -80,6 +81,7 @@ pub fn format_prove_section(artifacts: &ProveArtifacts) -> String {
     out.push_str(&format!("  Input hash:          {}\n", hex(&pi.input_hash)));
     out.push_str(&format!("  Tool responses hash: {}\n", hex(&pi.tool_responses_hash)));
     out.push_str(&format!("  Output hash:         {}\n", hex(&pi.output_hash)));
+    out.push_str(&format!("  TLS attestation hash:{}\n", hex(&pi.tls_attestation_hash)));
     out.push('\n');
     out.push_str(&format!("  Compiled program: {}\n", artifacts.compiled_path.display()));
     out.push_str(&format!("  Dry run result:   {}\n", artifacts.dry_result_path.display()));
@@ -103,7 +105,7 @@ mod tests {
 
     fn run_program(source: &str) -> (CompiledProgram, VmOutput) {
         let program = pipeline::compile_and_verify(source).unwrap();
-        let output =
+        let (output, _host) =
             pipeline::execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         (program, output)
     }
@@ -115,7 +117,7 @@ mod tests {
 
         let (program, output) = run_program("return 42");
         let artifacts =
-            build_proof_artifacts(&program, &LuaValue::Nil, output, dir_str).unwrap();
+            build_proof_artifacts(&program, &LuaValue::Nil, output, dir_str, vec![]).unwrap();
 
         // Files exist and are valid JSON
         assert!(artifacts.compiled_path.exists());
@@ -140,7 +142,7 @@ return r1.message
 "#;
         let (program, output) = run_program(source);
         let artifacts =
-            build_proof_artifacts(&program, &LuaValue::Nil, output, dir_str).unwrap();
+            build_proof_artifacts(&program, &LuaValue::Nil, output, dir_str, vec![]).unwrap();
 
         // Deserialize and check oracle tape
         let dry_json = fs::read_to_string(&artifacts.dry_result_path).unwrap();
@@ -154,13 +156,13 @@ return r1.message
         let dir2 = tempfile::tempdir().unwrap();
 
         let (p1, o1) = run_program("return 1");
-        let a1 = build_proof_artifacts(&p1, &LuaValue::Nil, o1, dir1.path().to_str().unwrap())
+        let a1 = build_proof_artifacts(&p1, &LuaValue::Nil, o1, dir1.path().to_str().unwrap(), vec![])
             .unwrap();
 
         let source = r#"tool.call("echo", {message = "hi"})
 return 1"#;
         let (p2, o2) = run_program(source);
-        let a2 = build_proof_artifacts(&p2, &LuaValue::Nil, o2, dir2.path().to_str().unwrap())
+        let a2 = build_proof_artifacts(&p2, &LuaValue::Nil, o2, dir2.path().to_str().unwrap(), vec![])
             .unwrap();
 
         assert_ne!(
@@ -178,6 +180,7 @@ return 1"#;
             &LuaValue::Nil,
             output,
             dir.path().to_str().unwrap(),
+            vec![],
         )
         .unwrap();
 
@@ -187,6 +190,7 @@ return 1"#;
         assert!(section.contains("Input hash:"));
         assert!(section.contains("Tool responses hash:"));
         assert!(section.contains("Output hash:"));
+        assert!(section.contains("TLS attestation hash:"));
         assert!(section.contains("compiled.json"));
         assert!(section.contains("dry_result.json"));
         assert!(section.contains("luai-openvm-encoder"));
@@ -201,7 +205,7 @@ return r.message"#;
         let program = pipeline::compile_and_verify(source).unwrap();
 
         // Path 1: orchestrator post-hoc
-        let output =
+        let (output, _host) =
             pipeline::execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let oracle_tape = OracleTape::from_records(&output.transcript);
         let pi_orchestrator =

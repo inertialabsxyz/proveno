@@ -83,7 +83,23 @@ impl From<reqwest::Error> for LlmError {
 
 impl LlmClient {
     pub fn new(api_key: String, model: String) -> Self {
-        let client = reqwest::blocking::Client::new();
+        use std::sync::Arc;
+
+        // Build a rustls ClientConfig with Mozilla root certs.
+        // Required because reqwest is configured with `rustls-tls-manual-roots`
+        // which doesn't bundle root certificates by default.
+        let root_store = rustls::RootCertStore::from_iter(
+            webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+        );
+        let tls_config = rustls::ClientConfig::builder()
+            .with_root_certificates(Arc::new(root_store))
+            .with_no_client_auth();
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .use_preconfigured_tls(tls_config)
+            .build()
+            .expect("failed to build HTTP client");
         LlmClient {
             api_key,
             model,

@@ -2,6 +2,7 @@ mod llm;
 mod pipeline;
 mod prompt;
 mod prove;
+mod tls_capture;
 mod tools;
 
 use clap::Parser;
@@ -137,8 +138,8 @@ fn main() {
 
         // Execute
         let host = tools::LiveHost::new(client.clone());
-        let output = match pipeline::execute(&program, LuaValue::Nil, config.clone(), host) {
-            Ok(o) => o,
+        let (output, host) = match pipeline::execute(&program, LuaValue::Nil, config.clone(), host) {
+            Ok(r) => r,
             Err(e) => {
                 eprintln!("[attempt {attempt}] {e}");
                 if attempt <= cli.max_retries {
@@ -158,6 +159,9 @@ fn main() {
             }
         };
 
+        // Recover TLS attestations from the host
+        let tls_attestations = host.into_tls_attestations();
+
         // Success
         let prove_artifacts = if cli.prove {
             let artifacts = prove::build_proof_artifacts(
@@ -165,6 +169,7 @@ fn main() {
                 &LuaValue::Nil,
                 output.clone(),
                 &cli.prove_output,
+                tls_attestations,
             );
             match artifacts {
                 Ok(a) => Some(a),
@@ -259,6 +264,7 @@ fn print_json(result: &pipeline::PipelineResult, prove_artifacts: &Option<prove:
             "input_hash": hex(&pi.input_hash),
             "tool_responses_hash": hex(&pi.tool_responses_hash),
             "output_hash": hex(&pi.output_hash),
+            "tls_attestation_hash": hex(&pi.tls_attestation_hash),
             "compiled_path": artifacts.compiled_path.to_string_lossy(),
             "dry_result_path": artifacts.dry_result_path.to_string_lossy(),
         });

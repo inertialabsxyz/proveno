@@ -175,6 +175,11 @@ impl<H: HostInterface> Vm<H> {
         }
     }
 
+    /// Consume the VM and return the underlying host.
+    pub fn into_host(self) -> H {
+        self.registry.into_host()
+    }
+
     pub fn execute(
         &mut self,
         program: &CompiledProgram,

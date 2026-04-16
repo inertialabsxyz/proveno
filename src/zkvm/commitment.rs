@@ -7,16 +7,19 @@
 //!   - what input it received (`input_hash`)
 //!   - which tool responses were consumed (`tool_responses_hash`)
 //!   - what outputs were produced (`output_hash`)
+//!   - TLS attestation over any HTTPS tool calls (`tls_attestation_hash`)
+//!   - execution policy (`policy_hash`, Phase 2 stub)
 
 use sha2::{Digest, Sha256};
 
 use crate::{
     host::{canonicalize::canonical_serialize, tape::OracleTape},
+    tls::{TlsAttestationRecord, compute_tls_attestation_hash},
     types::value::LuaValue,
     vm::engine::VmOutput,
 };
 
-/// The four public commitments attested by a zkVM proof.
+/// The public commitments attested by a zkVM proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PublicInputs {
@@ -32,6 +35,15 @@ pub struct PublicInputs {
 
     /// SHA-256 over `return_value || length-prefixed logs || transcript entries`.
     pub output_hash: [u8; 32],
+
+    /// SHA-256 over all P-256-verified TLS certificate chains, in order.
+    /// Zero (`[0u8; 32]`) when no HTTPS calls used P-256 ECDSA, or when TLS
+    /// attestation is unavailable.
+    pub tls_attestation_hash: [u8; 32],
+
+    /// SHA-256 of the canonical encoding of the `OraclePolicy` document.
+    /// Zero until Phase 2 populates this field.
+    pub policy_hash: [u8; 32], // Phase 2 stub
 }
 
 /// Compute the `input_hash` for a given `LuaValue`.
@@ -88,12 +100,15 @@ pub fn compute_public_inputs(
     input_value: &LuaValue,
     oracle_tape: &OracleTape,
     output: &VmOutput,
+    tls_attestations: &[TlsAttestationRecord],
 ) -> PublicInputs {
     PublicInputs {
         program_hash,
         input_hash: hash_input(input_value),
         tool_responses_hash: oracle_tape.commitment_hash(),
         output_hash: hash_output(output),
+        tls_attestation_hash: compute_tls_attestation_hash(tls_attestations),
+        policy_hash: [0u8; 32], // Phase 2 stub
     }
 }
 
@@ -160,10 +175,29 @@ mod tests {
         let program_hash = [1u8; 32];
         let input = LuaValue::Integer(42);
 
-        let pi = compute_public_inputs(program_hash, &input, &tape, &output);
+        let pi = compute_public_inputs(program_hash, &input, &tape, &output, &[]);
         assert_eq!(pi.program_hash, program_hash);
         assert_eq!(pi.input_hash, hash_input(&input));
         assert_eq!(pi.tool_responses_hash, tape.commitment_hash());
         assert_eq!(pi.output_hash, hash_output(&output));
+        assert_eq!(pi.tls_attestation_hash, [0u8; 32]);
+        assert_eq!(pi.policy_hash, [0u8; 32]);
+    }
+
+    #[test]
+    fn compute_public_inputs_tls_hash_nonzero_for_verified() {
+        let tape = OracleTape::new();
+        let output = make_output(LuaValue::Nil);
+        let attestations = vec![TlsAttestationRecord::p256_verified(vec![vec![1, 2, 3]])];
+        let pi = compute_public_inputs([0u8; 32], &LuaValue::Nil, &tape, &output, &attestations);
+        assert_ne!(pi.tls_attestation_hash, [0u8; 32]);
+    }
+
+    #[test]
+    fn compute_public_inputs_policy_hash_is_zero_stub() {
+        let tape = OracleTape::new();
+        let output = make_output(LuaValue::Nil);
+        let pi = compute_public_inputs([0u8; 32], &LuaValue::Nil, &tape, &output, &[]);
+        assert_eq!(pi.policy_hash, [0u8; 32]);
     }
 }

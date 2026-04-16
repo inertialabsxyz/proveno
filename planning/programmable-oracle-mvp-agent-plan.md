@@ -16,6 +16,37 @@ When spawning parallel agents, include in each prompt:
 
 All agents must pass `cargo test` before committing any change.
 
+**Every parallel agent call uses `isolation: "worktree"`.** This is implied throughout — it is not repeated on each agent block. Sequential agents run on the main branch (no worktree needed).
+
+After each parallel batch, the coordinator merges the worktree branches and confirms `cargo test` passes before proceeding. Each parallel block ends with a merge step showing this.
+
+---
+
+## Branching strategy
+
+**Parallel agents must never share a branch.** Concurrent commits to the same branch cause conflicts and race conditions.
+
+Use `isolation: "worktree"` on every parallel Agent call. This creates a separate git worktree on its own branch automatically. The worktree is returned with its branch name when the agent finishes.
+
+```
+// Correct: each parallel agent gets its own worktree
+Agent({ isolation: "worktree", description: "Agent A", prompt: "..." })
+Agent({ isolation: "worktree", description: "Agent B", prompt: "..." })
+Agent({ isolation: "worktree", description: "Agent C", prompt: "..." })
+
+// Then, after all three finish, merge their branches sequentially:
+git merge <branch-A>
+git merge <branch-B>
+git merge <branch-C>
+cargo test  // confirm clean merge before proceeding
+```
+
+**Sequential agents** within a phase run on the main working branch (no worktree needed) — they execute one at a time, so there is no conflict risk.
+
+**Phase boundaries** are always on the main branch. Before starting the next phase, all worktree branches from the current phase must be merged and `cargo test` must pass on the main branch.
+
+If two parallel agents touch overlapping files, split their scope so the overlap is eliminated — or make one sequential after the other. Overlapping parallel work is a task design error, not a merge problem to solve later.
+
 ---
 
 ## Phase 1 — Finish Proof Integrity
@@ -67,7 +98,7 @@ Agent B: "Implement Mozilla root CA pinning"
   - Commit as: feat(tls): add Mozilla root CA pinning
 ```
 
-Wait for both agents to complete before proceeding.
+**Merge:** `git merge <branch-A> && git merge <branch-B> && cargo test`
 
 ### Step 1.3 — Parallel: test + document
 
@@ -93,6 +124,8 @@ Agent B: "Document TLS attestation model"
   - This doc should be readable by a third party auditor
   - Commit as: docs(tls): document attestation model and trust boundaries
 ```
+
+**Merge:** `git merge <branch-A> && git merge <branch-B> && cargo test`
 
 ### Phase 1 acceptance checklist
 
@@ -162,6 +195,8 @@ Agent B: "Specify canonical serialization for all commitment inputs"
   - Commit as: docs(canon): specify canonical serialization format for all commitment inputs
 ```
 
+**Merge:** `git merge <branch-A> && git merge <branch-B> && cargo test`
+
 ### Step 2.3 — Parallel: domain allowlisting + host boundary validation
 
 ```
@@ -179,6 +214,8 @@ Agent B: "Validate tool args and return schemas at host boundary"
   - Add tests with malformed args and schema-mismatched responses
   - Commit as: feat(policy): validate tool args and response schemas at host boundary
 ```
+
+**Merge:** `git merge <branch-A> && git merge <branch-B> && cargo test`
 
 ### Step 2.4 — Parallel: define profiles + publish docs
 
@@ -198,6 +235,8 @@ Agent B: "Publish verifier-facing hashing and replay docs"
     - a worked example with inputs and expected hashes
   - Commit as: docs(verification): publish verifier-facing hashing and replay documentation
 ```
+
+**Merge:** `git merge <branch-A> && git merge <branch-B> && cargo test`
 
 ### Phase 2 acceptance checklist
 
@@ -256,6 +295,8 @@ Agent B: "Implement Solidity verifier contract"
   - Write a basic consumer contract that reads the verified output
   - Commit as: feat(contracts): add Solidity verifier and consumer contracts
 ```
+
+**Merge:** `git merge <branch-A> && git merge <branch-B> && cargo test`
 
 ### Step 3.3 — Sequential: deploy to testnet and benchmark
 
@@ -333,6 +374,8 @@ Agent C: "Define fixed output schema for downstream contracts"
   - Document the ABI encoding in docs/output-schema.md
   - Commit as: feat(oracle): define and document template_price_feed_v1 output schema
 ```
+
+**Merge:** `git merge <branch-A> && git merge <branch-B> && git merge <branch-C> && cargo test`
 
 ### Step 4.2 — Sequential: prompt-to-template parameterization
 
@@ -427,6 +470,8 @@ Agent C: "Calibrate gas and resource costs for template_price_feed_v1"
   - Commit as: docs(calibration): record gas and resource costs for template_price_feed_v1
 ```
 
+**Merge:** `git merge <branch-A> && git merge <branch-B> && git merge <branch-C> && cargo test`
+
 ### Step 5.2 — Parallel: observability + service hardening + packaging
 
 ```
@@ -448,6 +493,8 @@ Agent C: "Package MVP for deployment"
   - Document deployment steps in docs/deployment.md
   - Commit as: chore(deploy): add Dockerfile and deployment documentation
 ```
+
+**Merge:** `git merge <branch-A> && git merge <branch-B> && git merge <branch-C> && cargo test`
 
 ### Step 5.3 — Sequential: threat model doc
 
@@ -525,6 +572,8 @@ Agent D: "Publish benchmark numbers and known limitations"
     non-attested sources, liveness guarantees, mainnet
   - Commit as: docs(benchmarks): publish MVP benchmark numbers and known limitations
 ```
+
+**Merge:** `git merge <branch-A> && git merge <branch-B> && git merge <branch-C> && git merge <branch-D> && cargo test`
 
 ### Step 6.2 — Sequential: partner onboarding
 

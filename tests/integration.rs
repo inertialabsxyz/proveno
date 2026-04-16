@@ -908,19 +908,21 @@ fn run_with_host<H: HostInterface>(
     src: &str,
     host: H,
     attestations: std::sync::Arc<std::sync::Mutex<Vec<TlsAttestationRecord>>>,
-) -> Vec<TlsAttestationRecord> {
+) -> (luai::vm::engine::VmOutput, Vec<TlsAttestationRecord>) {
     let block = parse(src).expect("parse failed");
     let program = compile(&block).expect("compile failed");
     verify(&program).expect("verify failed");
     let mut vm = Vm::new(VmConfig::default(), host);
-    vm.execute(&program, LuaValue::Nil).expect("execution failed");
-    attestations.lock().unwrap().clone()
+    let output = vm.execute(&program, LuaValue::Nil).expect("execution failed");
+    let records = attestations.lock().unwrap().clone();
+    (output, records)
 }
 
 // ── TLS integration tests ─────────────────────────────────────────────────────
 
-/// End-to-end: make a real HTTPS request to a P-256-serving endpoint and
-/// assert that `tls_attestation_hash` is non-zero.
+/// End-to-end: make a real HTTPS request to a P-256-serving endpoint, run the
+/// full prove pipeline (compile → prover dry-run via `compute_public_inputs`),
+/// and assert that `PublicInputs.tls_attestation_hash` is non-zero.
 ///
 /// This test makes a real network call to example.com.
 #[test]
@@ -932,18 +934,38 @@ fn tls_attestation_nonzero_for_p256() {
 
     let attestations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let host = TlsCapturingHost::new(attestations.clone());
-    let records = run_with_host(src, host, attestations);
+    let (output, records) = run_with_host(src, host, attestations);
 
+    // Verify via `compute_tls_attestation_hash` directly.
     let hash = compute_tls_attestation_hash(&records);
     assert_ne!(
         hash,
         [0u8; 32],
         "expected non-zero tls_attestation_hash for P-256 server (got records: {records:?})"
     );
+
+    // Also verify end-to-end through `PublicInputs` (the full prove pipeline).
+    #[cfg(feature = "zkvm")]
+    {
+        use luai::{
+            host::tape::OracleTape,
+            zkvm::commitment::compute_public_inputs,
+        };
+        let block = parse(src).expect("parse failed");
+        let program = compile(&block).expect("compile failed");
+        let oracle_tape = OracleTape::from_records(&output.transcript);
+        let pi = compute_public_inputs(program.program_hash, &LuaValue::Nil, &oracle_tape, &output, &records);
+        assert_ne!(
+            pi.tls_attestation_hash,
+            [0u8; 32],
+            "PublicInputs.tls_attestation_hash must be non-zero for P-256 server"
+        );
+    }
 }
 
 /// Degradation: when no P-256 TLS attestation is available (non-HTTPS or
 /// non-P256 server), execution must complete without panic and yield a zero hash.
+/// Also verifies `PublicInputs.tls_attestation_hash == [0u8; 32]`.
 #[test]
 fn tls_degrades_cleanly_for_non_p256() {
     let src = r#"
@@ -953,7 +975,7 @@ fn tls_degrades_cleanly_for_non_p256() {
 
     let attestations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let host = NonTlsStubHost { attestations: attestations.clone() };
-    let records = run_with_host(src, host, attestations);
+    let (output, records) = run_with_host(src, host, attestations);
 
     // All attestations are unavailable → hash must be zero.
     let hash = compute_tls_attestation_hash(&records);
@@ -962,4 +984,22 @@ fn tls_degrades_cleanly_for_non_p256() {
         [0u8; 32],
         "expected zero tls_attestation_hash when no P-256 attestation is available"
     );
+
+    // Also verify end-to-end through `PublicInputs`.
+    #[cfg(feature = "zkvm")]
+    {
+        use luai::{
+            host::tape::OracleTape,
+            zkvm::commitment::compute_public_inputs,
+        };
+        let block = parse(src).expect("parse failed");
+        let program = compile(&block).expect("compile failed");
+        let oracle_tape = OracleTape::from_records(&output.transcript);
+        let pi = compute_public_inputs(program.program_hash, &LuaValue::Nil, &oracle_tape, &output, &records);
+        assert_eq!(
+            pi.tls_attestation_hash,
+            [0u8; 32],
+            "PublicInputs.tls_attestation_hash must be zero when no P-256 attestation"
+        );
+    }
 }

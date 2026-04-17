@@ -185,6 +185,7 @@ fn main() {
                 &program,
                 &LuaValue::Nil,
                 output.clone(),
+                vec![],
                 &cli.prove_output,
             );
             match artifacts {

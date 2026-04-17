@@ -8,6 +8,8 @@ pub mod vm;
 pub mod parser;
 pub mod compiler;
 pub mod bytecode;
+pub mod tls;
+pub mod policy;
 
 #[cfg(feature = "zkvm")]
 pub mod zkvm;

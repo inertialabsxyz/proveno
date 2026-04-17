@@ -10,6 +10,7 @@ serde_json = "1"
 luai_prover = { path = "../prover" }
 openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v1.4.1", features = ["std"] }
 hex = "0.4.3"
+# p256, x509-cert, webpki-roots are provided transitively via luai
 
 [[bin]]
 name = "luai-openvm"

@@ -3,6 +3,7 @@
 use luai::{
     compiler::proto::CompiledProgram,
     host::tape::OracleTape,
+    tls::TlsAttestationRecord,
     types::value::LuaValue,
     vm::engine::{HostInterface, Vm, VmConfig, VmOutput},
     zkvm::{
@@ -12,11 +13,16 @@ use luai::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Result of a dry run: the VM output and the oracle tape built from the transcript.
+/// Result of a dry run: the VM output, oracle tape, TLS attestations, and
+/// the public inputs computed from all of the above.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DryRunResult {
     pub output: VmOutput,
     pub oracle_tape: OracleTape,
+    /// TLS attestation records captured during HTTP(S) tool calls.
+    /// Empty when the host does not make HTTPS calls or does not support
+    /// TLS attestation.
+    pub tls_attestations: Vec<TlsAttestationRecord>,
     pub public_inputs: PublicInputs,
 }
 
@@ -41,21 +47,27 @@ impl<H: HostInterface> Prover<H> {
     ///
     /// This is "phase 1" of the two-phase execution model. The result contains
     /// the oracle tape needed for the zkVM replay.
+    ///
+    /// `tls_attestations` is empty when the host does not support TLS capture.
+    /// Pass attestations collected outside the VM (e.g. from a TLS-aware host
+    /// wrapper) via the `tls_attestations` parameter.
     pub fn dry_run(
         self,
         program: &CompiledProgram,
         input: LuaValue,
+        tls_attestations: Vec<TlsAttestationRecord>,
     ) -> Result<DryRunResult, luai::VmError> {
         let mut vm = Vm::new(self.config.clone(), self.host);
         let output = vm.execute(program, input.clone())?;
 
         let oracle_tape = OracleTape::from_records(&output.transcript);
         let public_inputs =
-            compute_public_inputs(program.program_hash, &input, &oracle_tape, &output);
+            compute_public_inputs(program.program_hash, &input, &oracle_tape, &output, &tls_attestations);
 
         Ok(DryRunResult {
             output,
             oracle_tape,
+            tls_attestations,
             public_inputs,
         })
     }

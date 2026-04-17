@@ -3,6 +3,7 @@ use std::{fs, path::PathBuf};
 use luai::{
     compiler::proto::CompiledProgram,
     host::tape::OracleTape,
+    tls::TlsAttestationRecord,
     types::value::LuaValue,
     vm::engine::VmOutput,
     zkvm::commitment::{PublicInputs, compute_public_inputs},
@@ -21,23 +22,29 @@ pub struct ProveArtifacts {
 /// Constructs the oracle tape and public inputs from the VM output (post-hoc
 /// witness generation), then serializes `compiled.json` and `dry_result.json`
 /// into the output directory.
+///
+/// `tls_attestations` should contain any TLS certificate records captured
+/// during HTTP(S) tool calls.  Pass an empty slice when TLS attestation is
+/// not available.
 pub fn build_proof_artifacts(
     program: &CompiledProgram,
     input: &LuaValue,
     output: VmOutput,
+    tls_attestations: Vec<TlsAttestationRecord>,
     output_dir: &str,
 ) -> Result<ProveArtifacts, String> {
     // Build oracle tape from transcript
     let oracle_tape = OracleTape::from_records(&output.transcript);
 
-    // Compute public inputs (the 4 commitment hashes)
+    // Compute public inputs (commitment hashes including TLS attestation)
     let public_inputs =
-        compute_public_inputs(program.program_hash, input, &oracle_tape, &output);
+        compute_public_inputs(program.program_hash, input, &oracle_tape, &output, &tls_attestations);
 
     // Assemble DryRunResult
     let dry_run_result = DryRunResult {
         output,
         oracle_tape,
+        tls_attestations,
         public_inputs: public_inputs.clone(),
     };
 
@@ -115,7 +122,7 @@ mod tests {
 
         let (program, output) = run_program("return 42");
         let artifacts =
-            build_proof_artifacts(&program, &LuaValue::Nil, output, dir_str).unwrap();
+            build_proof_artifacts(&program, &LuaValue::Nil, output, vec![], dir_str).unwrap();
 
         // Files exist and are valid JSON
         assert!(artifacts.compiled_path.exists());
@@ -140,7 +147,7 @@ return r1.message
 "#;
         let (program, output) = run_program(source);
         let artifacts =
-            build_proof_artifacts(&program, &LuaValue::Nil, output, dir_str).unwrap();
+            build_proof_artifacts(&program, &LuaValue::Nil, output, vec![], dir_str).unwrap();
 
         // Deserialize and check oracle tape
         let dry_json = fs::read_to_string(&artifacts.dry_result_path).unwrap();
@@ -154,13 +161,13 @@ return r1.message
         let dir2 = tempfile::tempdir().unwrap();
 
         let (p1, o1) = run_program("return 1");
-        let a1 = build_proof_artifacts(&p1, &LuaValue::Nil, o1, dir1.path().to_str().unwrap())
+        let a1 = build_proof_artifacts(&p1, &LuaValue::Nil, o1, vec![], dir1.path().to_str().unwrap())
             .unwrap();
 
         let source = r#"tool.call("echo", {message = "hi"})
 return 1"#;
         let (p2, o2) = run_program(source);
-        let a2 = build_proof_artifacts(&p2, &LuaValue::Nil, o2, dir2.path().to_str().unwrap())
+        let a2 = build_proof_artifacts(&p2, &LuaValue::Nil, o2, vec![], dir2.path().to_str().unwrap())
             .unwrap();
 
         assert_ne!(
@@ -177,6 +184,7 @@ return 1"#;
             &program,
             &LuaValue::Nil,
             output,
+            vec![],
             dir.path().to_str().unwrap(),
         )
         .unwrap();
@@ -200,16 +208,16 @@ return 1"#;
 return r.message"#;
         let program = pipeline::compile_and_verify(source).unwrap();
 
-        // Path 1: orchestrator post-hoc
+        // Path 1: orchestrator post-hoc (no TLS attestations)
         let output =
             pipeline::execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let oracle_tape = OracleTape::from_records(&output.transcript);
         let pi_orchestrator =
-            compute_public_inputs(program.program_hash, &LuaValue::Nil, &oracle_tape, &output);
+            compute_public_inputs(program.program_hash, &LuaValue::Nil, &oracle_tape, &output, &[]);
 
-        // Path 2: prover dry_run
+        // Path 2: prover dry_run (no TLS attestations)
         let prover = Prover::new(VmConfig::default(), StubHost, vec!["echo".into()]);
-        let dry = prover.dry_run(&program, LuaValue::Nil).unwrap();
+        let dry = prover.dry_run(&program, LuaValue::Nil, vec![]).unwrap();
         let pi_prover = dry.public_inputs;
 
         assert_eq!(pi_orchestrator, pi_prover);

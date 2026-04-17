@@ -188,7 +188,7 @@ mod tests {
     fn compute_public_inputs_tls_hash_nonzero_for_verified() {
         let tape = OracleTape::new();
         let output = make_output(LuaValue::Nil);
-        let attestations = vec![TlsAttestationRecord::p256_verified(vec![vec![1, 2, 3]])];
+        let attestations = vec![TlsAttestationRecord::p256_verified(vec![vec![1, 2, 3]], "example.com".to_string(), 0)];
         let pi = compute_public_inputs([0u8; 32], &LuaValue::Nil, &tape, &output, &attestations);
         assert_ne!(pi.tls_attestation_hash, [0u8; 32]);
     }

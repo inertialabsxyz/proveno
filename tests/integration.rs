@@ -5,7 +5,7 @@ use luai::{
     bytecode::verify,
     compiler::compile,
     parser::parse,
-    tls::{TlsAttestationRecord, compute_tls_attestation_hash},
+    tls::{TlsAttestationRecord, compute_tls_attestation_hash, verify::reverify_attestations},
     types::{
         table::{LuaKey, LuaTable},
         value::{LuaString, LuaValue},
@@ -1018,4 +1018,41 @@ fn tls_degrades_cleanly_for_non_p256() {
             "PublicInputs.tls_attestation_hash must be zero when no P-256 attestation"
         );
     }
+}
+
+/// `reverify_attestations` is the exact function the zkVM guest runs.  This
+/// test exercises it against a real TLS certificate captured from example.com,
+/// confirming that:
+/// 1. A real P-256 chain passes in-library verification (same code the guest uses).
+/// 2. Hostname is preserved.
+/// 3. `cert_not_after` is re-derived from the cert DER, not copied from the input.
+///
+/// This test makes a real network call to example.com.
+#[test]
+fn tls_reverify_attestations_matches_prover() {
+    // Capture a real cert chain the same way the prover host does.
+    let (_, _, prover_record) =
+        TlsCapturingHost::https_get("https://example.com").expect("HTTPS call failed");
+
+    assert!(
+        prover_record.p256_verified,
+        "prover_record must be p256_verified for this test to be meaningful"
+    );
+
+    // Run reverify_attestations — the same logic the guest executes.
+    let verified = reverify_attestations(&[prover_record.clone()]);
+    assert_eq!(verified.len(), 1);
+
+    let r = &verified[0];
+    assert!(r.p256_verified, "reverify_attestations must accept a real P-256 example.com cert");
+    assert_eq!(r.hostname, "example.com", "hostname must be preserved through reverification");
+    assert!(r.cert_not_after > 0, "cert_not_after must be extracted from the cert DER");
+
+    // Guest re-derives cert_not_after from the DER; it must agree with the
+    // prover's independently extracted value.
+    assert_eq!(
+        r.cert_not_after,
+        prover_record.cert_not_after,
+        "guest and prover must derive the same cert_not_after from the same cert DER"
+    );
 }

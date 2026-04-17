@@ -10,12 +10,7 @@ serde_json = "1"
 luai_prover = { path = "../prover" }
 openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v1.4.1", features = ["std"] }
 hex = "0.4.3"
-# P-256 ECDSA signature verification (no_std compatible)
-p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-# X.509 certificate chain parsing (std binary — use default features)
-x509-cert = "0.2"
-# Mozilla root CA trust anchors (no_std, static data)
-webpki-roots = "0.26"
+# p256, x509-cert, webpki-roots are provided transitively via luai
 
 [[bin]]
 name = "luai-openvm"

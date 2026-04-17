@@ -14,6 +14,8 @@
 //! - 4-byte LE: number of certs in chain
 //! - For each cert: 4-byte LE length, then DER bytes
 
+pub mod verify;
+
 use sha2::{Digest, Sha256};
 
 #[cfg(not(feature = "std"))]

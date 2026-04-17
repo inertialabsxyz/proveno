@@ -816,7 +816,8 @@ impl TlsCapturingHost {
         // Build attestation record.
         let chain = captured.lock().unwrap().clone();
         let attestation = if !chain.is_empty() && is_p256_leaf(&chain[0]) {
-            TlsAttestationRecord::p256_verified(chain)
+            let not_after = extract_not_after_from_der(&chain[0]);
+            TlsAttestationRecord::p256_verified(chain, host.to_string(), not_after)
         } else {
             TlsAttestationRecord::unavailable()
         };
@@ -834,6 +835,17 @@ fn is_p256_leaf(cert_der: &[u8]) -> bool {
     //   tag=06, length=08, value=2a 86 48 ce 3d 03 01 07
     const P256_OID: &[u8] = &[0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
     cert_der.windows(P256_OID.len()).any(|w| w == P256_OID)
+}
+
+/// Extract the `not_after` Unix timestamp from a DER-encoded certificate.
+/// Returns 0 on parse failure.
+fn extract_not_after_from_der(cert_der: &[u8]) -> u64 {
+    use x509_cert::Certificate;
+    use x509_cert::der::Decode;
+    match Certificate::from_der(cert_der) {
+        Ok(cert) => cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs(),
+        Err(_) => 0,
+    }
 }
 
 impl HostInterface for TlsCapturingHost {
@@ -935,6 +947,10 @@ fn tls_attestation_nonzero_for_p256() {
     let attestations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let host = TlsCapturingHost::new(attestations.clone());
     let (output, records) = run_with_host(src, host, attestations);
+
+    // Verify hostname and cert_not_after are populated.
+    assert_eq!(records[0].hostname, "example.com", "hostname must be captured from URL");
+    assert!(records[0].cert_not_after > 0, "cert_not_after must be non-zero for a real cert");
 
     // Verify via `compute_tls_attestation_hash` directly.
     let hash = compute_tls_attestation_hash(&records);

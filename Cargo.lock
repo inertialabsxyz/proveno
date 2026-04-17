@@ -924,6 +924,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "webpki-roots 0.26.11",
+ "x509-cert",
 ]
 
 [[package]]

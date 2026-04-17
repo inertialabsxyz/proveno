@@ -12,20 +12,21 @@ use luai::{
 
 // ── P-256 certificate chain verification ─────────────────────────────────────
 
-/// Verify a DER-encoded P-256 certificate chain against Mozilla root CAs.
+/// Verify a DER-encoded P-256 certificate chain against Mozilla root CAs,
+/// and confirm that the leaf certificate covers `hostname`.
 ///
 /// Returns `true` when:
 /// 1. The leaf certificate's public key uses the P-256 curve (OID 1.2.840.10045.3.1.7).
 /// 2. Each certificate's signature is valid under the next issuer's P-256 key.
 /// 3. The root certificate's SubjectPublicKeyInfo matches a Mozilla trust anchor.
+/// 4. The leaf certificate's Subject Alternative Names include `hostname`.
 ///
-/// Returns `false` on any parse error, unsupported algorithm, or chain validation
-/// failure. The caller treats `false` as "TLS attestation unavailable" and
-/// contributes zero to the `tls_attestation_hash`.
-fn verify_p256_chain(cert_chain_der: &[Vec<u8>]) -> bool {
-    use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+/// Returns `false` on any parse error, unsupported algorithm, hostname mismatch,
+/// or chain validation failure. The caller treats `false` as "TLS attestation
+/// unavailable" and contributes zero to the `tls_attestation_hash`.
+fn verify_p256_chain(cert_chain_der: &[Vec<u8>], hostname: &str) -> bool {
     use x509_cert::Certificate;
-    use x509_cert::der::{Decode, Encode};
+    use x509_cert::der::Decode;
 
     if cert_chain_der.is_empty() {
         return false;
@@ -59,7 +60,12 @@ fn verify_p256_chain(cert_chain_der: &[Vec<u8>]) -> bool {
         Ok(b) => b,
         Err(_) => return false,
     };
-    is_mozilla_root(&root_spki_der)
+    if !is_mozilla_root(&root_spki_der) {
+        return false;
+    }
+
+    // ── 4. Leaf cert SANs must cover the requested hostname ───────────────────
+    hostname_matches_cert(hostname, &certs[0])
 }
 
 /// `true` when the certificate's SubjectPublicKeyInfo declares a P-256 public key.
@@ -133,24 +139,218 @@ fn is_mozilla_root(spki_der: &[u8]) -> bool {
         .any(|anchor| anchor.subject_public_key_info.as_ref() == spki_der)
 }
 
+/// `true` when the leaf certificate's Subject Alternative Names include `hostname`.
+///
+/// Parses the SAN extension (OID 2.5.29.17) from the certificate's raw DER
+/// bytes to extract dNSName entries. Wildcard patterns (`*.example.com`) are
+/// matched against a single label. If no SAN extension is present, returns
+/// `false` — CN fallback is not supported.
+fn hostname_matches_cert(hostname: &str, cert: &x509_cert::Certificate) -> bool {
+    use x509_cert::der::asn1::ObjectIdentifier;
+
+    // OID for Subject Alternative Names: 2.5.29.17
+    const SAN_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.17");
+
+    let exts = match &cert.tbs_certificate.extensions {
+        Some(e) => e,
+        None => return false,
+    };
+
+    for ext in exts.iter() {
+        if ext.extn_id != SAN_OID {
+            continue;
+        }
+        // ext.extn_value is an OCTET STRING whose content is a DER-encoded
+        // SEQUENCE OF GeneralName. Parse it with our minimal DER reader to
+        // avoid lifetime and alloc complexity with x509-cert's GeneralName.
+        return san_contains_hostname(ext.extn_value.as_bytes(), hostname);
+    }
+
+    // No SAN extension — CN fallback not supported for security reasons.
+    false
+}
+
+/// Parse the DER bytes of a SubjectAltName extension value (a SEQUENCE OF
+/// GeneralName) and return `true` if any dNSName entry matches `hostname`.
+///
+/// dNSName is encoded as context tag `[2]` (0x82) followed by IA5String bytes.
+fn san_contains_hostname(san_der: &[u8], hostname: &str) -> bool {
+    const DNS_NAME_TAG: u8 = 0x82; // [2] IMPLICIT IA5String
+
+    let seq_content = match der_inner(san_der, 0x30) {
+        Some(b) => b,
+        None => return false,
+    };
+
+    let mut pos = 0;
+    while pos < seq_content.len() {
+        let (tag, content, total_len) = match der_read_tlv(&seq_content[pos..]) {
+            Some(x) => x,
+            None => break,
+        };
+        if tag == DNS_NAME_TAG {
+            if let Ok(s) = core::str::from_utf8(content) {
+                if dns_name_matches(s, hostname) {
+                    return true;
+                }
+            }
+        }
+        pos += total_len;
+    }
+    false
+}
+
+/// Extract the content bytes of a DER TLV with the given tag.
+/// Returns `None` on parse error or tag mismatch.
+fn der_inner(data: &[u8], expected_tag: u8) -> Option<&[u8]> {
+    if data.is_empty() || data[0] != expected_tag {
+        return None;
+    }
+    let (len, header_len) = der_read_length(&data[1..])?;
+    let end = 1 + header_len + len;
+    if data.len() < end {
+        return None;
+    }
+    Some(&data[1 + header_len..end])
+}
+
+/// Read one DER TLV from `data`. Returns `(tag, content, total_bytes_consumed)`.
+fn der_read_tlv(data: &[u8]) -> Option<(u8, &[u8], usize)> {
+    if data.is_empty() {
+        return None;
+    }
+    let tag = data[0];
+    let (len, header_len) = der_read_length(&data[1..])?;
+    let total = 1 + header_len + len;
+    if data.len() < total {
+        return None;
+    }
+    Some((tag, &data[1 + header_len..total], total))
+}
+
+/// Parse a DER length field. Returns `(length_value, bytes_consumed)`.
+fn der_read_length(data: &[u8]) -> Option<(usize, usize)> {
+    if data.is_empty() {
+        return None;
+    }
+    if data[0] < 0x80 {
+        return Some((data[0] as usize, 1));
+    }
+    let num_bytes = (data[0] & 0x7f) as usize;
+    if data.len() < 1 + num_bytes || num_bytes == 0 || num_bytes > 4 {
+        return None;
+    }
+    let mut len = 0usize;
+    for i in 0..num_bytes {
+        len = (len << 8) | (data[1 + i] as usize);
+    }
+    Some((len, 1 + num_bytes))
+}
+
+/// Case-insensitive DNS name matching with single-label wildcard support.
+///
+/// `*.example.com` matches `foo.example.com` but not `example.com` or
+/// `foo.bar.example.com`. Exact matches are case-insensitive.
+fn dns_name_matches(pattern: &str, hostname: &str) -> bool {
+    if let Some(wc_suffix) = pattern.strip_prefix("*.") {
+        // Wildcard: hostname must be exactly one dot-free label + "." + wc_suffix.
+        if let Some(dot_pos) = hostname.find('.') {
+            let label = &hostname[..dot_pos];
+            let rest = &hostname[dot_pos + 1..];
+            return !label.contains('.') && rest.eq_ignore_ascii_case(wc_suffix);
+        }
+        return false;
+    }
+    pattern.eq_ignore_ascii_case(hostname)
+}
+
+/// Extract the leaf certificate's `not_after` validity timestamp as Unix seconds.
+/// Returns 0 on parse failure (cert already passed `verify_p256_chain`, so this
+/// is a safety fallback).
+fn extract_cert_not_after(cert_der: &[u8]) -> u64 {
+    use x509_cert::Certificate;
+    use x509_cert::der::Decode;
+
+    match Certificate::from_der(cert_der) {
+        Ok(cert) => cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs(),
+        Err(_) => 0,
+    }
+}
+
 /// Re-verify TLS attestation records in-guest.
 ///
-/// For each record, if the raw DER cert chain passes `verify_p256_chain`,
-/// the record is emitted with `p256_verified = true`. Otherwise the record
-/// is emitted with `p256_verified = false` (unavailable). This ensures the
-/// proof only commits a non-zero `tls_attestation_hash` when the P-256 chain
-/// verification actually passes inside the zkVM.
+/// For each record, if the raw DER cert chain passes `verify_p256_chain`
+/// (P-256 signatures + Mozilla root + hostname match), the record is emitted
+/// with `p256_verified = true` and the guest-derived `cert_not_after`.
+/// Otherwise the record is emitted as unavailable. This ensures the proof only
+/// commits a non-zero `tls_attestation_hash` when all checks pass inside the
+/// zkVM, and that the committed `cert_not_after` is extracted from the cert
+/// itself (not trusted from the prover).
 fn reverify_attestations(records: &[TlsAttestationRecord]) -> Vec<TlsAttestationRecord> {
     records
         .iter()
         .map(|r| {
-            if !r.cert_chain_der.is_empty() && verify_p256_chain(&r.cert_chain_der) {
-                TlsAttestationRecord::p256_verified(r.cert_chain_der.clone())
-            } else {
-                TlsAttestationRecord::unavailable()
+            if r.cert_chain_der.is_empty() || r.hostname.is_empty() {
+                return TlsAttestationRecord::unavailable();
             }
+            if !verify_p256_chain(&r.cert_chain_der, &r.hostname) {
+                return TlsAttestationRecord::unavailable();
+            }
+            // Re-derive not_after from the leaf cert DER so a malicious prover
+            // cannot supply a forged timestamp.
+            let not_after = extract_cert_not_after(&r.cert_chain_der[0]);
+            TlsAttestationRecord::p256_verified(
+                r.cert_chain_der.clone(),
+                r.hostname.clone(),
+                not_after,
+            )
         })
         .collect()
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dns_name_matches_exact() {
+        assert!(dns_name_matches("example.com", "example.com"));
+        assert!(dns_name_matches("Example.COM", "example.com")); // case-insensitive
+        assert!(!dns_name_matches("other.com", "example.com"));
+    }
+
+    #[test]
+    fn dns_name_matches_wildcard() {
+        assert!(dns_name_matches("*.example.com", "foo.example.com"));
+        assert!(dns_name_matches("*.example.com", "bar.example.com"));
+        assert!(!dns_name_matches("*.example.com", "example.com")); // no bare label
+        assert!(!dns_name_matches("*.example.com", "foo.bar.example.com")); // two labels
+    }
+
+    #[test]
+    fn san_empty_gives_no_match() {
+        // SEQUENCE {} — empty SAN
+        let empty_seq = &[0x30u8, 0x00];
+        assert!(!san_contains_hostname(empty_seq, "example.com"));
+    }
+
+    #[test]
+    fn san_with_dns_name_matches() {
+        // Build a minimal SAN DER: SEQUENCE { [2] "example.com" }
+        let dns_bytes = b"example.com";
+        let mut san = Vec::new();
+        san.push(0x82u8); // [2] IMPLICIT IA5String
+        san.push(dns_bytes.len() as u8);
+        san.extend_from_slice(dns_bytes);
+        let mut seq = Vec::new();
+        seq.push(0x30u8);
+        seq.push(san.len() as u8);
+        seq.extend_from_slice(&san);
+        assert!(san_contains_hostname(&seq, "example.com"));
+        assert!(!san_contains_hostname(&seq, "other.com"));
+    }
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -172,8 +372,8 @@ fn main() {
         .execute(&program, input_value.clone())
         .expect("VM execution failed");
 
-    // Re-verify TLS attestations in-guest: P-256 ECDSA signatures must pass
-    // here (inside the proof) not just in the prover host.
+    // Re-verify TLS attestations in-guest: P-256 ECDSA signatures + hostname
+    // match must pass here (inside the proof), not just in the prover host.
     let verified_attestations = reverify_attestations(&dry_run_result.tls_attestations);
 
     let public_inputs = compute_public_inputs(

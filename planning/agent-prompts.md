@@ -131,13 +131,17 @@ You are implementing Phase 2 of the luai MVP. The full specification is in `plan
 
 ### Context
 
-Phase 1 is complete. The proof pipeline now produces a non-zero `tls_attestation_hash` for P256-supporting servers. The following is in place:
+Phase 1 is complete. The proof pipeline produces a non-zero `tls_attestation_hash` for P-256-supporting servers. The following is in place:
 
-- `src/policy/mod.rs` exists with a `OraclePolicy` stub (zero `policy_hash`). You will replace this stub with a full implementation.
-- `src/zkvm/commitment.rs` — `PublicInputs` has a `policy_hash: [u8; 32]` field currently populated as zeros. You will wire it up.
+- `src/tls/mod.rs` — `TlsAttestationRecord` (fields: `cert_chain_der`, `p256_verified`, `hostname`, `cert_not_after`) and `compute_tls_attestation_hash(&[TlsAttestationRecord]) -> [u8; 32]`. Returns zero hash if no verified records.
+- `src/tls/verify.rs` — full P-256 ECDSA verification against Mozilla root store (via `webpki-roots`), SAN hostname matching.
+- `src/policy/mod.rs` — `OraclePolicy` stub with `policy_hash() -> [u8; 32]` returning `[0u8; 32]`. You will replace this.
+- `src/zkvm/commitment.rs` — `PublicInputs` has six `[u8; 32]` fields: `program_hash`, `input_hash`, `tool_responses_hash`, `output_hash`, `tls_attestation_hash`, `policy_hash` (currently zero stub). `compute_public_inputs` signature: `(program_hash, input_value, oracle_tape, output, tls_attestations: &[TlsAttestationRecord]) -> PublicInputs`.
 - `src/host/tool_registry.rs` — `ToolRegistry<H>` wraps a `HostInterface`, enforces per-call quotas, records a `Transcript`. You will add policy enforcement here.
 - `src/host/canonicalize.rs` — `canonical_serialize(v: &LuaValue) -> Vec<u8>` is the single JSON encoding path.
-- `docs/tls-attestation.md` documents the TLS trust model.
+- `prover/src/prover.rs` — `DryRunResult` holds `tls_attestations: Vec<TlsAttestationRecord>` and `public_inputs: PublicInputs`.
+- `openvm/src/main.rs` — OpenVM guest calls `reverify_attestations` then `compute_public_inputs` and reveals all six fields.
+- `docs/tls-attestation.md` — documents what the attestation hash proves and does not prove.
 
 `cargo test` passes and must continue to pass after your changes.
 
@@ -162,9 +166,11 @@ Implement all of Phase 2 as specified in `planning/programmable-oracle-mvp-plan.
 
 ### Do Not Touch
 
-- `luai-openvm/` — Phase 1's domain; read it, do not modify it
+- `src/tls/` — Phase 1's domain; read it, do not modify it
+- `openvm/` — Phase 1's domain; do not modify the guest
+- `prover/` — do not modify the prover pipeline
 - `docs/tls-attestation.md` — Phase 1's doc; do not overwrite
-- The OpenVM guest or prover pipeline — your changes are in `src/` only
+- Your changes are in `src/policy/`, `src/host/tool_registry.rs`, `src/zkvm/commitment.rs`, and `docs/` only
 
 ### Verification
 

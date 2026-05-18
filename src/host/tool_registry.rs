@@ -93,15 +93,13 @@ impl<H: HostInterface> ToolRegistry<H> {
 
         // 4. Policy: HTTP method and domain allowlist checks.
         #[cfg(feature = "std")]
-        if let Some(ref policy) = self.policy {
-            if is_http_tool(name) {
-                let url = get_url_from_args(args_table).unwrap_or_default();
-                if let Err(reason) = policy.check_http_call(name, &url) {
-                    return Err(VmError::RuntimeError(LuaValue::String(
-                        LuaString::from_str(&reason),
-                    )));
-                }
-            }
+        if let Some(ref policy) = self.policy
+            && is_http_tool(name)
+        {
+            let url = get_url_from_args(args_table).unwrap_or_default();
+            policy.check_http_call(name, &url).map_err(|reason| {
+                VmError::RuntimeError(LuaValue::String(LuaString::from_str(&reason)))
+            })?;
         }
 
         // 5. Increment counters.
@@ -131,15 +129,15 @@ impl<H: HostInterface> ToolRegistry<H> {
 
                 // 7c. Policy: response schema validation.
                 #[cfg(feature = "std")]
-                if let Some(ref policy) = self.policy {
-                    if is_http_tool(name) {
-                        let url = get_url_from_args(args_table).unwrap_or_default();
-                        if let Err(reason) = policy.check_response_schema(&url, &resp_canonical) {
-                            return Err(VmError::RuntimeError(LuaValue::String(
-                                LuaString::from_str(&reason),
-                            )));
-                        }
-                    }
+                if let Some(ref policy) = self.policy
+                    && is_http_tool(name)
+                {
+                    let url = get_url_from_args(args_table).unwrap_or_default();
+                    policy
+                        .check_response_schema(&url, &resp_canonical)
+                        .map_err(|reason| {
+                            VmError::RuntimeError(LuaValue::String(LuaString::from_str(&reason)))
+                        })?;
                 }
 
                 // 7d. Update bytes-out counter.

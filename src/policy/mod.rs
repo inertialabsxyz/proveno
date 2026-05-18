@@ -125,7 +125,7 @@ impl OraclePolicy {
 
     /// SHA-256 of `canonical_bytes()`. Stable across machines and runs.
     pub fn policy_hash(&self) -> [u8; 32] {
-        Sha256::digest(&self.canonical_bytes()).into()
+        Sha256::digest(self.canonical_bytes()).into()
     }
 
     /// Check whether the given HTTP tool call is permitted by this policy.
@@ -223,7 +223,7 @@ fn schema_matches(schema: &serde_json::Value, actual: &serde_json::Value) -> boo
             schema_map.iter().all(|(key, schema_val)| {
                 actual_map
                     .get(key)
-                    .map_or(false, |v| schema_matches(schema_val, v))
+                    .is_some_and(|v| schema_matches(schema_val, v))
             })
         }
     }

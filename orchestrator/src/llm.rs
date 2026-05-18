@@ -1,14 +1,21 @@
 use serde::{Deserialize, Serialize};
 
+/// Which LLM provider to talk to.
+#[derive(Debug, Clone)]
+pub enum Backend {
+    Anthropic { api_key: String },
+    Ollama { base_url: String },
+}
+
 #[derive(Debug, Clone)]
 pub struct LlmClient {
-    api_key: String,
+    backend: Backend,
     model: String,
     client: reqwest::blocking::Client,
 }
 
 #[derive(Debug, Serialize)]
-struct ApiRequest {
+struct AnthropicRequest {
     model: String,
     max_tokens: u32,
     system: String,
@@ -22,10 +29,10 @@ pub struct Message {
 }
 
 #[derive(Debug, Deserialize)]
-struct ApiResponse {
+struct AnthropicResponse {
     content: Vec<ContentBlock>,
     #[serde(default)]
-    usage: Option<ApiUsage>,
+    usage: Option<AnthropicUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,9 +41,30 @@ struct ContentBlock {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct ApiUsage {
+struct AnthropicUsage {
     input_tokens: u64,
     output_tokens: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct OllamaRequest {
+    model: String,
+    stream: bool,
+    messages: Vec<Message>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaResponse {
+    message: OllamaMessage,
+    #[serde(default)]
+    prompt_eval_count: Option<u64>,
+    #[serde(default)]
+    eval_count: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaMessage {
+    content: String,
 }
 
 /// Token usage from a single LLM call.
@@ -82,10 +110,14 @@ impl From<reqwest::Error> for LlmError {
 }
 
 impl LlmClient {
-    pub fn new(api_key: String, model: String) -> Self {
-        let client = reqwest::blocking::Client::new();
+    pub fn new(backend: Backend, model: String) -> Self {
+        // Generous timeout — local Ollama models can take >60s to load on first call.
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .expect("failed to build HTTP client");
         LlmClient {
-            api_key,
+            backend,
             model,
             client,
         }
@@ -98,7 +130,19 @@ impl LlmClient {
         system_prompt: &str,
         messages: &[Message],
     ) -> Result<LlmResponse, LlmError> {
-        let request = ApiRequest {
+        match &self.backend {
+            Backend::Anthropic { api_key } => self.generate_anthropic(api_key, system_prompt, messages),
+            Backend::Ollama { base_url } => self.generate_ollama(base_url, system_prompt, messages),
+        }
+    }
+
+    fn generate_anthropic(
+        &self,
+        api_key: &str,
+        system_prompt: &str,
+        messages: &[Message],
+    ) -> Result<LlmResponse, LlmError> {
+        let request = AnthropicRequest {
             model: self.model.clone(),
             max_tokens: 4096,
             system: system_prompt.to_string(),
@@ -108,7 +152,7 @@ impl LlmClient {
         let resp = self
             .client
             .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", &self.api_key)
+            .header("x-api-key", api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
             .json(&request)
@@ -120,7 +164,7 @@ impl LlmClient {
             return Err(LlmError::Api(format!("status {status}: {body}")));
         }
 
-        let api_resp: ApiResponse = resp.json()?;
+        let api_resp: AnthropicResponse = resp.json()?;
         let usage = match api_resp.usage {
             Some(u) => TokenUsage {
                 input_tokens: u.input_tokens,
@@ -136,6 +180,54 @@ impl LlmClient {
             .collect::<Vec<_>>()
             .join("");
 
+        if text.is_empty() {
+            return Err(LlmError::NoContent);
+        }
+
+        Ok(LlmResponse { text, usage })
+    }
+
+    fn generate_ollama(
+        &self,
+        base_url: &str,
+        system_prompt: &str,
+        messages: &[Message],
+    ) -> Result<LlmResponse, LlmError> {
+        // Ollama puts the system prompt inside the messages array.
+        let mut all_messages = Vec::with_capacity(messages.len() + 1);
+        all_messages.push(Message {
+            role: "system".into(),
+            content: system_prompt.to_string(),
+        });
+        all_messages.extend_from_slice(messages);
+
+        let request = OllamaRequest {
+            model: self.model.clone(),
+            stream: false,
+            messages: all_messages,
+        };
+
+        let url = format!("{}/api/chat", base_url.trim_end_matches('/'));
+        let resp = self
+            .client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&request)
+            .send()?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().unwrap_or_default();
+            return Err(LlmError::Api(format!("status {status}: {body}")));
+        }
+
+        let api_resp: OllamaResponse = resp.json()?;
+        let usage = TokenUsage {
+            input_tokens: api_resp.prompt_eval_count.unwrap_or(0),
+            output_tokens: api_resp.eval_count.unwrap_or(0),
+        };
+
+        let text = api_resp.message.content;
         if text.is_empty() {
             return Err(LlmError::NoContent);
         }

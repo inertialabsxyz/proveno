@@ -493,7 +493,10 @@ mod tests {
 
     fn make_live_host() -> LiveHost {
         // LlmClient with dummy key — won't be called in KV/time tests
-        let llm = LlmClient::new("dummy-key".into(), "dummy-model".into());
+        let llm = LlmClient::new(
+            crate::llm::Backend::Anthropic { api_key: "dummy-key".into() },
+            "dummy-model".into(),
+        );
         LiveHost::new(llm)
     }
 

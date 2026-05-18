@@ -6,6 +6,7 @@ pub mod bytecode;
 pub mod compiler;
 pub mod host;
 pub mod parser;
+#[cfg(feature = "std")]
 pub mod policy;
 pub mod tls;
 pub mod types;

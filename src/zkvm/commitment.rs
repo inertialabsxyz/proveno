@@ -93,6 +93,9 @@ pub fn hash_output(output: &VmOutput) -> [u8; 32] {
 }
 
 /// Build `PublicInputs` from all the components of an execution.
+///
+/// `policy_hash` is `[0u8; 32]` (no-policy stub). Use
+/// `compute_public_inputs_with_policy` when a real policy is in force.
 pub fn compute_public_inputs(
     program_hash: [u8; 32],
     input_value: &LuaValue,
@@ -106,7 +109,30 @@ pub fn compute_public_inputs(
         tool_responses_hash: oracle_tape.commitment_hash(),
         output_hash: hash_output(output),
         tls_attestation_hash: compute_tls_attestation_hash(tls_attestations),
-        policy_hash: [0u8; 32], // Phase 2 stub
+        policy_hash: [0u8; 32],
+    }
+}
+
+/// Build `PublicInputs` and populate `policy_hash` from the given policy.
+///
+/// Use this variant when running under a real `OraclePolicy`. The hash is
+/// stable: same policy struct → same bytes on any machine.
+#[cfg(feature = "std")]
+pub fn compute_public_inputs_with_policy(
+    program_hash: [u8; 32],
+    input_value: &LuaValue,
+    oracle_tape: &OracleTape,
+    output: &VmOutput,
+    tls_attestations: &[TlsAttestationRecord],
+    policy: &crate::policy::OraclePolicy,
+) -> PublicInputs {
+    PublicInputs {
+        program_hash,
+        input_hash: hash_input(input_value),
+        tool_responses_hash: oracle_tape.commitment_hash(),
+        output_hash: hash_output(output),
+        tls_attestation_hash: compute_tls_attestation_hash(tls_attestations),
+        policy_hash: policy.policy_hash(),
     }
 }
 
@@ -196,10 +222,59 @@ mod tests {
     }
 
     #[test]
-    fn compute_public_inputs_policy_hash_is_zero_stub() {
+    fn compute_public_inputs_policy_hash_is_zero_without_policy() {
         let tape = OracleTape::new();
         let output = make_output(LuaValue::Nil);
         let pi = compute_public_inputs([0u8; 32], &LuaValue::Nil, &tape, &output, &[]);
         assert_eq!(pi.policy_hash, [0u8; 32]);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn compute_public_inputs_with_policy_nonzero_hash() {
+        use crate::policy::profiles::constrained_http_v1;
+
+        let tape = OracleTape::new();
+        let output = make_output(LuaValue::Nil);
+        let policy = constrained_http_v1();
+
+        let pi = compute_public_inputs_with_policy(
+            [0u8; 32],
+            &LuaValue::Nil,
+            &tape,
+            &output,
+            &[],
+            &policy,
+        );
+        assert_ne!(pi.policy_hash, [0u8; 32]);
+        assert_eq!(pi.policy_hash, policy.policy_hash());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn compute_public_inputs_with_policy_hash_stable() {
+        use crate::policy::profiles::template_price_feed_v1;
+
+        let tape = OracleTape::new();
+        let output = make_output(LuaValue::Nil);
+        let policy = template_price_feed_v1();
+
+        let pi1 = compute_public_inputs_with_policy(
+            [0u8; 32],
+            &LuaValue::Nil,
+            &tape,
+            &output,
+            &[],
+            &policy,
+        );
+        let pi2 = compute_public_inputs_with_policy(
+            [0u8; 32],
+            &LuaValue::Nil,
+            &tape,
+            &output,
+            &[],
+            &policy,
+        );
+        assert_eq!(pi1.policy_hash, pi2.policy_hash);
     }
 }

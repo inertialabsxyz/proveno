@@ -185,6 +185,25 @@ impl<H: HostInterface> Vm<H> {
         }
     }
 
+    /// Create a VM with an attached `OraclePolicy`. Tool calls are checked
+    /// against the policy's domain allowlist, method restriction, and schemas.
+    #[cfg(feature = "std")]
+    pub fn new_with_policy(config: VmConfig, host: H, policy: crate::policy::OraclePolicy) -> Self {
+        let gas = GasMeter::new(config.gas_limit);
+        let mem = MemoryMeter::new(config.memory_limit_bytes);
+        Vm {
+            config,
+            gas,
+            mem,
+            stack: Vec::new(),
+            frames: Vec::new(),
+            logs: Vec::new(),
+            transcript: Transcript::new(),
+            registry: ToolRegistry::with_policy(host, policy),
+            globals: build_globals(),
+        }
+    }
+
     pub fn execute(
         &mut self,
         program: &CompiledProgram,

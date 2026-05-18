@@ -17,9 +17,17 @@ struct Cli {
     /// The task to accomplish (natural language)
     task: String,
 
-    /// Claude model to use
-    #[arg(long, default_value = "claude-sonnet-4-20250514")]
-    model: String,
+    /// LLM provider: "anthropic" or "ollama"
+    #[arg(long, default_value = "anthropic")]
+    provider: String,
+
+    /// Model name. Defaults: anthropic→claude-sonnet-4-20250514, ollama→llama3.1
+    #[arg(long)]
+    model: Option<String>,
+
+    /// Base URL for the Ollama server (only used when --provider=ollama)
+    #[arg(long, default_value = "http://localhost:11434")]
+    ollama_url: String,
 
     /// Maximum retry attempts on compile/runtime errors
     #[arg(long, default_value_t = 3)]
@@ -45,6 +53,10 @@ struct Cli {
     #[arg(long)]
     max_tool_calls: Option<usize>,
 
+    /// Generate the Lua program and print it to stdout — skip compile, execute, retry
+    #[arg(long)]
+    generate_only: bool,
+
     /// Generate ZK proof artifacts after successful execution
     #[arg(long)]
     prove: bool,
@@ -60,15 +72,29 @@ fn main() {
     // Load .env file if present (silently ignore if missing)
     let _ = dotenvy::dotenv();
 
-    let api_key = match std::env::var("ANTHROPIC_API_KEY") {
-        Ok(key) => key,
-        Err(_) => {
-            eprintln!("error: ANTHROPIC_API_KEY environment variable not set");
+    let (backend, model) = match cli.provider.as_str() {
+        "anthropic" => {
+            let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+                Ok(key) => key,
+                Err(_) => {
+                    eprintln!("error: ANTHROPIC_API_KEY environment variable not set");
+                    std::process::exit(1);
+                }
+            };
+            let model = cli.model.clone().unwrap_or_else(|| "claude-sonnet-4-20250514".into());
+            (llm::Backend::Anthropic { api_key }, model)
+        }
+        "ollama" => {
+            let model = cli.model.clone().unwrap_or_else(|| "llama3.1".into());
+            (llm::Backend::Ollama { base_url: cli.ollama_url.clone() }, model)
+        }
+        other => {
+            eprintln!("error: unknown --provider '{other}' (expected 'anthropic' or 'ollama')");
             std::process::exit(1);
         }
     };
 
-    let client = llm::LlmClient::new(api_key, cli.model.clone());
+    let client = llm::LlmClient::new(backend, model.clone());
 
     // Build tool catalogue and system prompt
     let tool_descs = tools::live_tool_descriptions();
@@ -125,6 +151,21 @@ fn main() {
 
         let source = llm::strip_code_fences(&raw_response);
 
+        if cli.generate_only {
+            // Print Lua to stdout, usage stats to stderr; skip compile/execute.
+            print!("{source}");
+            if !source.ends_with('\n') {
+                println!();
+            }
+            eprintln!(
+                "[generate-only] tokens: {} in + {} out = {} total",
+                total_usage.input_tokens,
+                total_usage.output_tokens,
+                total_usage.total()
+            );
+            return;
+        }
+
         if cli.verbose {
             eprintln!("── LLM response (raw) ─────────────────────────");
             eprintln!("{raw_response}");
@@ -137,6 +178,14 @@ fn main() {
         let program = match pipeline::compile_and_verify(&source) {
             Ok(p) => p,
             Err(e) => {
+                if matches!(e, pipeline::PipelineError::Parse(_)) {
+                    println!("── Parse error: generated program ─────────────");
+                    println!("{source}");
+                    if !source.ends_with('\n') {
+                        println!();
+                    }
+                    println!("───────────────────────────────────────────────");
+                }
                 eprintln!("[attempt {attempt}] {e}");
                 if attempt <= cli.max_retries {
                     let retry_msg = pipeline::format_error_for_retry(&source, &e);
@@ -201,7 +250,7 @@ fn main() {
 
         let result = pipeline::PipelineResult {
             task: cli.task.clone(),
-            model: cli.model.clone(),
+            model: model.clone(),
             source,
             output,
             config: config.clone(),

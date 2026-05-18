@@ -7,9 +7,7 @@
 use alloc::{string::String, vec::Vec};
 
 use crate::{
-    compiler::proto::CompiledProgram,
-    host::tape::OracleTape,
-    types::value::LuaValue,
+    compiler::proto::CompiledProgram, host::tape::OracleTape, types::value::LuaValue,
     vm::engine::VmConfig,
 };
 
@@ -36,6 +34,12 @@ impl GuestInput {
         config: VmConfig,
         tool_names: Vec<String>,
     ) -> Self {
-        GuestInput { program, input_value, oracle_tape, config, tool_names }
+        GuestInput {
+            program,
+            input_value,
+            oracle_tape,
+            config,
+            tool_names,
+        }
     }
 }

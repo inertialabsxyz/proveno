@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Instruction {
     Nop,
-    PushK(u16),          // push constant[idx]
+    PushK(u16), // push constant[idx]
     PushNil,
     PushTrue,
     PushFalse,
@@ -22,8 +22,8 @@ pub enum Instruction {
     NewTable,
     GetTable,
     SetTable,
-    GetField(u16),       // key = constant[idx] (must be string)
-    SetField(u16),       // key = constant[idx] (must be string)
+    GetField(u16), // key = constant[idx] (must be string)
+    SetField(u16), // key = constant[idx] (must be string)
     Add,
     Sub,
     Mul,
@@ -37,18 +37,18 @@ pub enum Instruction {
     Gt,
     Ge,
     Not,
-    And(i16),            // short-circuit offset
-    Or(i16),             // short-circuit offset
-    Concat(u8),          // n values
+    And(i16),   // short-circuit offset
+    Or(i16),    // short-circuit offset
+    Concat(u8), // n values
     Len,
     Jmp(i16),
     JmpIf(i16),
     JmpIfNot(i16),
-    Call(u8),            // argc
-    Ret(u8),             // n return values (0 or 1)
-    Closure(u16),        // prototype index
+    Call(u8),     // argc
+    Ret(u8),      // n return values (0 or 1)
+    Closure(u16), // prototype index
     ToolCall,
-    PCall(u8),           // argc
+    PCall(u8), // argc
     Log,
     Error,
     IterInitSorted(i16), // jump offset if empty

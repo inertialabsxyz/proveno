@@ -1,5 +1,9 @@
 #[cfg(not(feature = "std"))]
-use alloc::{format, string::{String, ToString}, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 /// Byte offset span + line number for a token or AST node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,7 +20,11 @@ impl Span {
 
     /// Dummy span used when a real position is unavailable.
     pub fn dummy() -> Self {
-        Span { start: 0, end: 0, line: 0 }
+        Span {
+            start: 0,
+            end: 0,
+            line: 0,
+        }
     }
 }
 
@@ -55,31 +63,31 @@ pub enum Token {
     KwWhile,
 
     // Punctuation / operators
-    Plus,        // +
-    Minus,       // -
-    Star,        // *
-    SlashSlash,  // //
-    Percent,     // %
-    DotDot,      // ..
-    DotDotDot,   // ...
-    Hash,        // #
-    Eq,          // ==
-    TildeEq,     // ~=
-    Lt,          // <
-    LtEq,        // <=
-    Gt,          // >
-    GtEq,        // >=
-    Assign,      // =
-    LParen,      // (
-    RParen,      // )
-    LBrace,      // {
-    RBrace,      // }
-    LBracket,    // [
-    RBracket,    // ]
-    Semicolon,   // ;
-    Colon,       // :
-    Comma,       // ,
-    Dot,         // .
+    Plus,       // +
+    Minus,      // -
+    Star,       // *
+    SlashSlash, // //
+    Percent,    // %
+    DotDot,     // ..
+    DotDotDot,  // ...
+    Hash,       // #
+    Eq,         // ==
+    TildeEq,    // ~=
+    Lt,         // <
+    LtEq,       // <=
+    Gt,         // >
+    GtEq,       // >=
+    Assign,     // =
+    LParen,     // (
+    RParen,     // )
+    LBrace,     // {
+    RBrace,     // }
+    LBracket,   // [
+    RBracket,   // ]
+    Semicolon,  // ;
+    Colon,      // :
+    Comma,      // ,
+    Dot,        // .
 
     Eof,
 }
@@ -116,7 +124,11 @@ pub enum ParseError {
 
     // ---- Parse-time errors ----
     /// Unexpected token
-    UnexpectedToken { span: Span, expected: &'static str, got: String },
+    UnexpectedToken {
+        span: Span,
+        expected: &'static str,
+        got: String,
+    },
     /// Expected an expression
     ExpectedExpr { span: Span },
 
@@ -172,24 +184,16 @@ impl ParseError {
             ParseError::SingleSlash { .. } => {
                 "use `//` for floor division; the `/` operator is not supported".into()
             }
-            ParseError::FloatLiteral { .. } => {
-                "floating-point literals are not supported".into()
-            }
-            ParseError::IntegerOverflow { .. } => {
-                "integer literal out of i64 range".into()
-            }
-            ParseError::BadEscape { .. } => {
-                "unrecognized escape sequence in string literal".into()
-            }
+            ParseError::FloatLiteral { .. } => "floating-point literals are not supported".into(),
+            ParseError::IntegerOverflow { .. } => "integer literal out of i64 range".into(),
+            ParseError::BadEscape { .. } => "unrecognized escape sequence in string literal".into(),
             ParseError::StringTooLong { .. } => {
                 "string literal exceeds maximum length (65536 bytes)".into()
             }
             ParseError::UnexpectedChar { ch, .. } => {
                 format!("unexpected character: {:?}", ch)
             }
-            ParseError::UnterminatedString { .. } => {
-                "unterminated string literal".into()
-            }
+            ParseError::UnterminatedString { .. } => "unterminated string literal".into(),
             ParseError::UnterminatedComment { .. } => {
                 "unterminated block comment or long string".into()
             }
@@ -198,7 +202,8 @@ impl ParseError {
             }
             ParseError::ExpectedExpr { .. } => "expected expression".into(),
             ParseError::ToolAsValue { .. } => {
-                "`tool` is a compile-time namespace; only `tool.call(name, args)` is permitted".into()
+                "`tool` is a compile-time namespace; only `tool.call(name, args)` is permitted"
+                    .into()
             }
             ParseError::DisallowedIdent { name, .. } => {
                 format!("`{}` is not available in this VM", name)
@@ -224,7 +229,11 @@ pub struct Lexer<'src> {
 
 impl<'src> Lexer<'src> {
     pub fn new(src: &'src str) -> Self {
-        Lexer { src: src.as_bytes(), pos: 0, line: 1 }
+        Lexer {
+            src: src.as_bytes(),
+            pos: 0,
+            line: 1,
+        }
     }
 
     pub fn tokenize(mut self) -> Result<Vec<SpannedToken>, ParseError> {
@@ -247,11 +256,19 @@ impl<'src> Lexer<'src> {
     // --- Internal helpers ---
 
     fn cur(&self) -> u8 {
-        if self.pos < self.src.len() { self.src[self.pos] } else { 0 }
+        if self.pos < self.src.len() {
+            self.src[self.pos]
+        } else {
+            0
+        }
     }
 
     fn peek(&self) -> u8 {
-        if self.pos + 1 < self.src.len() { self.src[self.pos + 1] } else { 0 }
+        if self.pos + 1 < self.src.len() {
+            self.src[self.pos + 1]
+        } else {
+            0
+        }
     }
 
     fn advance(&mut self) -> u8 {
@@ -272,9 +289,7 @@ impl<'src> Lexer<'src> {
     fn skip_whitespace_and_comments(&mut self) -> Result<(), ParseError> {
         loop {
             // Skip whitespace
-            while self.pos < self.src.len()
-                && matches!(self.cur(), b' ' | b'\t' | b'\r' | b'\n')
-            {
+            while self.pos < self.src.len() && matches!(self.cur(), b' ' | b'\t' | b'\r' | b'\n') {
                 self.advance();
             }
 
@@ -330,20 +345,13 @@ impl<'src> Lexer<'src> {
 
     /// Skip (or collect) a long string body `]=*]` with the given level.
     /// Returns the raw bytes if collecting, else discards.
-    fn skip_long_string(
-        &mut self,
-        level: usize,
-        discard: bool,
-    ) -> Result<Vec<u8>, ParseError> {
+    fn skip_long_string(&mut self, level: usize, discard: bool) -> Result<Vec<u8>, ParseError> {
         let start = self.pos - 2; // points back to opening --
         self.consume_long_bracket_open(level);
         // Skip initial newline if present (Lua spec)
         if self.pos < self.src.len() && self.cur() == b'\n' {
             self.advance();
-        } else if self.pos + 1 < self.src.len()
-            && self.cur() == b'\r'
-            && self.peek() == b'\n'
-        {
+        } else if self.pos + 1 < self.src.len() && self.cur() == b'\r' && self.peek() == b'\n' {
             self.advance();
             self.advance();
         }
@@ -391,19 +399,58 @@ impl<'src> Lexer<'src> {
         let c = self.cur();
 
         match c {
-            b'+' => { self.pos += 1; Ok(self.tok(Token::Plus, start, line)) }
-            b'-' => { self.pos += 1; Ok(self.tok(Token::Minus, start, line)) }
-            b'*' => { self.pos += 1; Ok(self.tok(Token::Star, start, line)) }
-            b'%' => { self.pos += 1; Ok(self.tok(Token::Percent, start, line)) }
-            b'#' => { self.pos += 1; Ok(self.tok(Token::Hash, start, line)) }
-            b'(' => { self.pos += 1; Ok(self.tok(Token::LParen, start, line)) }
-            b')' => { self.pos += 1; Ok(self.tok(Token::RParen, start, line)) }
-            b'{' => { self.pos += 1; Ok(self.tok(Token::LBrace, start, line)) }
-            b'}' => { self.pos += 1; Ok(self.tok(Token::RBrace, start, line)) }
-            b']' => { self.pos += 1; Ok(self.tok(Token::RBracket, start, line)) }
-            b';' => { self.pos += 1; Ok(self.tok(Token::Semicolon, start, line)) }
-            b':' => { self.pos += 1; Ok(self.tok(Token::Colon, start, line)) }
-            b',' => { self.pos += 1; Ok(self.tok(Token::Comma, start, line)) }
+            b'+' => {
+                self.pos += 1;
+                Ok(self.tok(Token::Plus, start, line))
+            }
+            b'-' => {
+                self.pos += 1;
+                Ok(self.tok(Token::Minus, start, line))
+            }
+            b'*' => {
+                self.pos += 1;
+                Ok(self.tok(Token::Star, start, line))
+            }
+            b'%' => {
+                self.pos += 1;
+                Ok(self.tok(Token::Percent, start, line))
+            }
+            b'#' => {
+                self.pos += 1;
+                Ok(self.tok(Token::Hash, start, line))
+            }
+            b'(' => {
+                self.pos += 1;
+                Ok(self.tok(Token::LParen, start, line))
+            }
+            b')' => {
+                self.pos += 1;
+                Ok(self.tok(Token::RParen, start, line))
+            }
+            b'{' => {
+                self.pos += 1;
+                Ok(self.tok(Token::LBrace, start, line))
+            }
+            b'}' => {
+                self.pos += 1;
+                Ok(self.tok(Token::RBrace, start, line))
+            }
+            b']' => {
+                self.pos += 1;
+                Ok(self.tok(Token::RBracket, start, line))
+            }
+            b';' => {
+                self.pos += 1;
+                Ok(self.tok(Token::Semicolon, start, line))
+            }
+            b':' => {
+                self.pos += 1;
+                Ok(self.tok(Token::Colon, start, line))
+            }
+            b',' => {
+                self.pos += 1;
+                Ok(self.tok(Token::Comma, start, line))
+            }
 
             b'/' => {
                 if self.peek() == b'/' {
@@ -411,7 +458,9 @@ impl<'src> Lexer<'src> {
                     Ok(self.tok(Token::SlashSlash, start, line))
                 } else {
                     self.pos += 1;
-                    Err(ParseError::SingleSlash { span: self.span_from(start, line) })
+                    Err(ParseError::SingleSlash {
+                        span: self.span_from(start, line),
+                    })
                 }
             }
 
@@ -469,7 +518,9 @@ impl<'src> Lexer<'src> {
                     }
                 } else if self.peek().is_ascii_digit() {
                     self.pos += 1;
-                    Err(ParseError::FloatLiteral { span: self.span_from(start, line) })
+                    Err(ParseError::FloatLiteral {
+                        span: self.span_from(start, line),
+                    })
                 } else {
                     self.pos += 1;
                     Ok(self.tok(Token::Dot, start, line))
@@ -507,7 +558,10 @@ impl<'src> Lexer<'src> {
     }
 
     fn tok(&self, token: Token, start: usize, line: u32) -> SpannedToken {
-        SpannedToken { token, span: Span::new(start, self.pos, line) }
+        SpannedToken {
+            token,
+            span: Span::new(start, self.pos, line),
+        }
     }
 
     // --- Number lexing ---
@@ -521,11 +575,11 @@ impl<'src> Lexer<'src> {
                 self.pos += 1;
             }
             // Check for float-like suffix
-            if self.pos < self.src.len()
-                && matches!(self.src[self.pos], b'.' | b'p' | b'P')
-            {
+            if self.pos < self.src.len() && matches!(self.src[self.pos], b'.' | b'p' | b'P') {
                 self.pos += 1;
-                return Err(ParseError::FloatLiteral { span: self.span_from(start, line) });
+                return Err(ParseError::FloatLiteral {
+                    span: self.span_from(start, line),
+                });
             }
             let hex_str = core::str::from_utf8(&self.src[hex_start..self.pos]).unwrap();
             if hex_str.is_empty() {
@@ -556,11 +610,11 @@ impl<'src> Lexer<'src> {
             self.pos += 1;
         }
         // Float check: `.digit` or `e`/`E`
-        if self.pos < self.src.len()
-            && matches!(self.src[self.pos], b'.' | b'e' | b'E')
-        {
+        if self.pos < self.src.len() && matches!(self.src[self.pos], b'.' | b'e' | b'E') {
             self.pos += 1;
-            return Err(ParseError::FloatLiteral { span: self.span_from(start, line) });
+            return Err(ParseError::FloatLiteral {
+                span: self.span_from(start, line),
+            });
         }
 
         let text = core::str::from_utf8(&self.src[start..self.pos]).unwrap();
@@ -601,7 +655,9 @@ impl<'src> Lexer<'src> {
             }
         }
         if buf.len() > MAX_STRING_LEN {
-            return Err(ParseError::StringTooLong { span: self.span_from(start, line) });
+            return Err(ParseError::StringTooLong {
+                span: self.span_from(start, line),
+            });
         }
         Ok(SpannedToken {
             token: Token::StringLit(buf),
@@ -611,23 +667,25 @@ impl<'src> Lexer<'src> {
 
     fn read_escape(&mut self, start: usize, line: u32) -> Result<u8, ParseError> {
         if self.pos >= self.src.len() {
-            return Err(ParseError::BadEscape { span: self.span_from(start, line) });
+            return Err(ParseError::BadEscape {
+                span: self.span_from(start, line),
+            });
         }
         let esc_line = self.line;
         let esc_start = self.pos;
         let c = self.advance();
         match c {
             b'\\' => Ok(b'\\'),
-            b'"'  => Ok(b'"'),
+            b'"' => Ok(b'"'),
             b'\'' => Ok(b'\''),
-            b'n'  => Ok(b'\n'),
-            b'r'  => Ok(b'\r'),
-            b't'  => Ok(b'\t'),
-            b'0'  => Ok(0),
-            b'a'  => Ok(7),   // bell
-            b'b'  => Ok(8),   // backspace
-            b'f'  => Ok(12),  // form feed
-            b'v'  => Ok(11),  // vertical tab
+            b'n' => Ok(b'\n'),
+            b'r' => Ok(b'\r'),
+            b't' => Ok(b'\t'),
+            b'0' => Ok(0),
+            b'a' => Ok(7),  // bell
+            b'b' => Ok(8),  // backspace
+            b'f' => Ok(12), // form feed
+            b'v' => Ok(11), // vertical tab
             b'\n' | b'\r' => Ok(b'\n'),
             b'x' => {
                 // \xNN — exactly 2 hex digits
@@ -648,10 +706,7 @@ impl<'src> Lexer<'src> {
                 // Decimal escape: 1–3 digits, value 0–255
                 let mut val = (c - b'0') as u32;
                 let mut count = 1;
-                while count < 3
-                    && self.pos < self.src.len()
-                    && self.cur().is_ascii_digit()
-                {
+                while count < 3 && self.pos < self.src.len() && self.cur().is_ascii_digit() {
                     val = val * 10 + (self.cur() - b'0') as u32;
                     self.pos += 1;
                     count += 1;
@@ -681,10 +736,7 @@ impl<'src> Lexer<'src> {
         // Skip initial newline
         if self.pos < self.src.len() && self.cur() == b'\n' {
             self.advance();
-        } else if self.pos + 1 < self.src.len()
-            && self.cur() == b'\r'
-            && self.peek() == b'\n'
-        {
+        } else if self.pos + 1 < self.src.len() && self.cur() == b'\r' && self.peek() == b'\n' {
             self.advance();
             self.advance();
         }
@@ -725,7 +777,11 @@ impl<'src> Lexer<'src> {
 
     // --- Identifier / keyword ---
 
-    fn read_ident_or_keyword(&mut self, start: usize, line: u32) -> Result<SpannedToken, ParseError> {
+    fn read_ident_or_keyword(
+        &mut self,
+        start: usize,
+        line: u32,
+    ) -> Result<SpannedToken, ParseError> {
         while self.pos < self.src.len()
             && (self.src[self.pos].is_ascii_alphanumeric() || self.src[self.pos] == b'_')
         {
@@ -733,28 +789,31 @@ impl<'src> Lexer<'src> {
         }
         let text = core::str::from_utf8(&self.src[start..self.pos]).unwrap();
         let token = match text {
-            "and"      => Token::KwAnd,
-            "break"    => Token::KwBreak,
-            "do"       => Token::KwDo,
-            "else"     => Token::KwElse,
-            "elseif"   => Token::KwElseif,
-            "end"      => Token::KwEnd,
-            "false"    => Token::KwFalse,
-            "for"      => Token::KwFor,
+            "and" => Token::KwAnd,
+            "break" => Token::KwBreak,
+            "do" => Token::KwDo,
+            "else" => Token::KwElse,
+            "elseif" => Token::KwElseif,
+            "end" => Token::KwEnd,
+            "false" => Token::KwFalse,
+            "for" => Token::KwFor,
             "function" => Token::KwFunction,
-            "if"       => Token::KwIf,
-            "in"       => Token::KwIn,
-            "local"    => Token::KwLocal,
-            "nil"      => Token::KwNil,
-            "not"      => Token::KwNot,
-            "or"       => Token::KwOr,
-            "return"   => Token::KwReturn,
-            "then"     => Token::KwThen,
-            "true"     => Token::KwTrue,
-            "while"    => Token::KwWhile,
-            _          => Token::Ident(text.to_string()),
+            "if" => Token::KwIf,
+            "in" => Token::KwIn,
+            "local" => Token::KwLocal,
+            "nil" => Token::KwNil,
+            "not" => Token::KwNot,
+            "or" => Token::KwOr,
+            "return" => Token::KwReturn,
+            "then" => Token::KwThen,
+            "true" => Token::KwTrue,
+            "while" => Token::KwWhile,
+            _ => Token::Ident(text.to_string()),
         };
-        Ok(SpannedToken { token, span: self.span_from(start, line) })
+        Ok(SpannedToken {
+            token,
+            span: self.span_from(start, line),
+        })
     }
 }
 
@@ -776,7 +835,9 @@ mod tests {
     use super::*;
 
     fn lex(src: &str) -> Result<Vec<Token>, ParseError> {
-        Lexer::new(src).tokenize().map(|v| v.into_iter().map(|t| t.token).collect())
+        Lexer::new(src)
+            .tokenize()
+            .map(|v| v.into_iter().map(|t| t.token).collect())
     }
 
     fn lex_ok(src: &str) -> Vec<Token> {
@@ -853,7 +914,10 @@ mod tests {
     #[test]
     fn line_comment_skipped() {
         let toks = lex_ok("42 -- this is a comment\n1");
-        assert_eq!(toks, vec![Token::Integer(42), Token::Integer(1), Token::Eof]);
+        assert_eq!(
+            toks,
+            vec![Token::Integer(42), Token::Integer(1), Token::Eof]
+        );
     }
 
     #[test]
@@ -879,7 +943,10 @@ mod tests {
 
     #[test]
     fn tilde_alone_rejected() {
-        assert!(matches!(lex("~"), Err(ParseError::UnexpectedChar { ch: '~', .. })));
+        assert!(matches!(
+            lex("~"),
+            Err(ParseError::UnexpectedChar { ch: '~', .. })
+        ));
     }
 
     #[test]

@@ -229,7 +229,12 @@ pub enum TableField {
     /// `[expr] = expr`
     ExplicitKey { key: Expr, value: Expr, span: Span },
     /// `name = expr`
-    NamedKey { name: String, name_span: Span, value: Expr, span: Span },
+    NamedKey {
+        name: String,
+        name_span: Span,
+        value: Expr,
+        span: Span,
+    },
     /// `expr` — auto-numbered integer key starting from 1
     Positional { value: Expr, span: Span },
 }

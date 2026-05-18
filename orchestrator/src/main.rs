@@ -5,10 +5,7 @@ mod prove;
 mod tools;
 
 use clap::Parser;
-use luai::{
-    types::value::LuaValue,
-    vm::engine::VmConfig,
-};
+use luai::{types::value::LuaValue, vm::engine::VmConfig};
 
 #[derive(Parser)]
 #[command(name = "luai-orchestrator")]
@@ -81,12 +78,20 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            let model = cli.model.clone().unwrap_or_else(|| "claude-sonnet-4-20250514".into());
+            let model = cli
+                .model
+                .clone()
+                .unwrap_or_else(|| "claude-sonnet-4-20250514".into());
             (llm::Backend::Anthropic { api_key }, model)
         }
         "ollama" => {
             let model = cli.model.clone().unwrap_or_else(|| "llama3.1".into());
-            (llm::Backend::Ollama { base_url: cli.ollama_url.clone() }, model)
+            (
+                llm::Backend::Ollama {
+                    base_url: cli.ollama_url.clone(),
+                },
+                model,
+            )
         }
         other => {
             eprintln!("error: unknown --provider '{other}' (expected 'anthropic' or 'ollama')");

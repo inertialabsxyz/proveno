@@ -1,6 +1,7 @@
 use luai::{
-    bytecode, compiler, parser,
+    bytecode, compiler,
     host::transcript::ToolCallStatus,
+    parser,
     types::{
         table::{LuaKey, LuaTable},
         value::{LuaString, LuaValue},
@@ -44,7 +45,8 @@ impl HostInterface for DemoHost {
                     Some(LuaValue::Integer(n)) => *n,
                     _ => return Err("add: expected integer arg 'b'".into()),
                 };
-                resp.rawset(str_key("result"), LuaValue::Integer(a + b)).unwrap();
+                resp.rawset(str_key("result"), LuaValue::Integer(a + b))
+                    .unwrap();
             }
             // upper: returns {result = string.upper(args.text)}
             "upper" => {

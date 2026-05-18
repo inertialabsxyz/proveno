@@ -15,19 +15,20 @@ use luai::{
 /// Format a LuaValue as a serde_json::Value for JSON output.
 pub fn format_return_value(v: &LuaValue) -> serde_json::Value {
     match v {
-        LuaValue::Table(_) => {
-            match canonical_serialize(v) {
-                Ok(bytes) => {
-                    let compact = String::from_utf8_lossy(&bytes);
-                    serde_json::from_str(&compact).unwrap_or(serde_json::Value::String(compact.into_owned()))
-                }
-                Err(_) => serde_json::Value::String(format!("{v}")),
+        LuaValue::Table(_) => match canonical_serialize(v) {
+            Ok(bytes) => {
+                let compact = String::from_utf8_lossy(&bytes);
+                serde_json::from_str(&compact)
+                    .unwrap_or(serde_json::Value::String(compact.into_owned()))
             }
-        }
+            Err(_) => serde_json::Value::String(format!("{v}")),
+        },
         LuaValue::Nil => serde_json::Value::Null,
         LuaValue::Boolean(b) => serde_json::Value::Bool(*b),
         LuaValue::Integer(n) => serde_json::json!(n),
-        LuaValue::String(s) => serde_json::Value::String(String::from_utf8_lossy(s.as_bytes()).into_owned()),
+        LuaValue::String(s) => {
+            serde_json::Value::String(String::from_utf8_lossy(s.as_bytes()).into_owned())
+        }
         _ => serde_json::Value::String(format!("{v}")),
     }
 }
@@ -41,7 +42,8 @@ fn format_value(v: &LuaValue) -> String {
                     // canonical_serialize produces compact JSON — pretty-print it
                     let compact = String::from_utf8_lossy(&bytes);
                     match serde_json::from_str::<serde_json::Value>(&compact) {
-                        Ok(parsed) => serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| compact.into_owned()),
+                        Ok(parsed) => serde_json::to_string_pretty(&parsed)
+                            .unwrap_or_else(|_| compact.into_owned()),
                         Err(_) => compact.into_owned(),
                     }
                 }
@@ -123,8 +125,7 @@ impl std::fmt::Display for PipelineError {
 /// Compile Lua source to a verified program.
 pub fn compile_and_verify(source: &str) -> Result<CompiledProgram, PipelineError> {
     let ast = parser::parse(source).map_err(|e| PipelineError::Parse(format!("{e:?}")))?;
-    let program =
-        compiler::compile(&ast).map_err(|e| PipelineError::Compile(format!("{e:?}")))?;
+    let program = compiler::compile(&ast).map_err(|e| PipelineError::Compile(format!("{e:?}")))?;
     bytecode::verify(&program).map_err(|e| PipelineError::Verify(format!("{e:?}")))?;
     Ok(program)
 }
@@ -200,7 +201,10 @@ pub fn format_output(result: &PipelineResult) -> String {
     out.push_str("\n\n");
 
     out.push_str("── Result ─────────────────────────────────────\n");
-    out.push_str(&format!("{}\n\n", format_value(&result.output.return_value)));
+    out.push_str(&format!(
+        "{}\n\n",
+        format_value(&result.output.return_value)
+    ));
 
     if !result.output.logs.is_empty() {
         out.push_str("── Logs ───────────────────────────────────────\n");
@@ -310,10 +314,12 @@ return r.message"#;
 
     #[test]
     fn execute_with_logs() {
-        let program = compile_and_verify(r#"log("hello")
+        let program = compile_and_verify(
+            r#"log("hello")
 log("world")
-return 0"#)
-            .unwrap();
+return 0"#,
+        )
+        .unwrap();
         let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(output.logs, vec!["hello", "world"]);
     }
@@ -657,6 +663,9 @@ return time_string
 "#;
         let program = compile_and_verify(source).unwrap();
         let result = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost);
-        assert!(result.is_err(), "should return error for unsupported format specifier");
+        assert!(
+            result.is_err(),
+            "should return error for unsupported format specifier"
+        );
     }
 }

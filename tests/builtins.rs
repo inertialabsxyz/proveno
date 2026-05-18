@@ -2,6 +2,7 @@
 //!
 //! These tests compile + execute Lua source through the full pipeline.
 
+use luai::types::value::LuaValue;
 use luai::{
     bytecode::verify,
     compiler::compile,
@@ -9,7 +10,6 @@ use luai::{
     vm::engine::{NoopHost, Vm, VmConfig, VmOutput},
     vm::gas::VmError,
 };
-use luai::types::value::LuaValue;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -255,7 +255,10 @@ fn string_sub_negative_start() {
 
 #[test]
 fn string_find_found() {
-    assert_returns_int(r#"local i, j = string.find("hello world", "world") return i"#, 7);
+    assert_returns_int(
+        r#"local i, j = string.find("hello world", "world") return i"#,
+        7,
+    );
 }
 
 #[test]
@@ -308,10 +311,7 @@ fn string_char_basic() {
 #[test]
 fn string_byte_char_roundtrip() {
     // string.byte with single char, string.char converts it back
-    assert_returns_str(
-        r#"local b = string.byte("h") return string.char(b)"#,
-        "h",
-    );
+    assert_returns_str(r#"local b = string.byte("h") return string.char(b)"#, "h");
 }
 
 // ── string.format ─────────────────────────────────────────────────────────────
@@ -323,7 +323,10 @@ fn string_format_d() {
 
 #[test]
 fn string_format_s() {
-    assert_returns_str(r#"return string.format("hello %s", "world")"#, "hello world");
+    assert_returns_str(
+        r#"return string.format("hello %s", "world")"#,
+        "hello world",
+    );
 }
 
 #[test]
@@ -338,7 +341,10 @@ fn string_format_percent() {
 
 #[test]
 fn string_format_mixed() {
-    assert_returns_str(r#"return string.format("%d + %d = %d", 1, 2, 3)"#, "1 + 2 = 3");
+    assert_returns_str(
+        r#"return string.format("%d + %d = %d", 1, 2, 3)"#,
+        "1 + 2 = 3",
+    );
 }
 
 // ── math.abs ──────────────────────────────────────────────────────────────────
@@ -694,7 +700,8 @@ fn gas_charged_for_string_upper() {
 
 #[test]
 fn stdlib_comprehensive_program() {
-    let out = run_ok(r#"
+    let out = run_ok(
+        r#"
 -- Use several stdlib functions together
 local nums = {5, 3, 8, 1, 9, 2}
 table.sort(nums)
@@ -706,18 +713,21 @@ end
 
 local result = table.concat(parts, ",")
 return result
-"#);
+"#,
+    );
     assert_eq!(out.return_value, s("1,2,3,5,8,9"));
 }
 
 #[test]
 fn stdlib_json_log_program() {
-    let out = run_ok(r#"
+    let out = run_ok(
+        r#"
 local data = {name = "test", value = 42}
 local encoded = json.encode(data)
 log(encoded)
 return string.len(encoded)
-"#);
+"#,
+    );
     assert_eq!(out.logs.len(), 1);
     assert!(matches!(out.return_value, LuaValue::Integer(n) if n > 0));
 }

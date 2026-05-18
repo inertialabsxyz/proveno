@@ -1,8 +1,8 @@
-use crate::compiler::proto::{CompiledProgram, FunctionProto, Instruction, Constant};
-#[cfg(feature = "std")]
-use std::collections::VecDeque;
+use crate::compiler::proto::{CompiledProgram, Constant, FunctionProto, Instruction};
 #[cfg(not(feature = "std"))]
 use alloc::{collections::VecDeque, vec, vec::Vec};
+#[cfg(feature = "std")]
+use std::collections::VecDeque;
 
 pub const MAX_STACK_DEPTH: usize = 256;
 
@@ -19,7 +19,11 @@ pub enum VerifyError {
     UpvalueIndexOob { proto: u16, pc: usize, index: u8 },
 
     /// Jump target is outside [0, code.len()].
-    JumpOutOfRange { proto: u16, pc: usize, target: usize },
+    JumpOutOfRange {
+        proto: u16,
+        pc: usize,
+        target: usize,
+    },
 
     /// Stack depth went negative.
     StackUnderflow { proto: u16, pc: usize },
@@ -28,10 +32,20 @@ pub enum VerifyError {
     StackOverflow { proto: u16, pc: usize, depth: usize },
 
     /// Two paths to the same instruction disagree on stack depth.
-    StackDepthMismatch { proto: u16, pc: usize, expected: usize, got: usize },
+    StackDepthMismatch {
+        proto: u16,
+        pc: usize,
+        expected: usize,
+        got: usize,
+    },
 
     /// RET instruction has wrong stack depth vs declared return count.
-    RetStackMismatch { proto: u16, pc: usize, expected: usize, got: usize },
+    RetStackMismatch {
+        proto: u16,
+        pc: usize,
+        expected: usize,
+        got: usize,
+    },
 
     /// Prototype reference graph contains a cycle.
     PrototypeCycle { proto: u16 },
@@ -85,7 +99,9 @@ fn check_proto_dag(program: &CompiledProgram) -> Result<(), VerifyError> {
                 match color[child] {
                     1 => {
                         // Back edge → cycle.
-                        return Err(VerifyError::PrototypeCycle { proto: child as u16 });
+                        return Err(VerifyError::PrototypeCycle {
+                            proto: child as u16,
+                        });
                     }
                     0 => {
                         color[child] = 1;
@@ -135,14 +151,18 @@ fn structural_checks(
             Instruction::PushK(idx) => {
                 if *idx as usize >= const_len {
                     return Err(VerifyError::ConstantIndexOob {
-                        proto: proto_idx, pc, index: *idx,
+                        proto: proto_idx,
+                        pc,
+                        index: *idx,
                     });
                 }
             }
             Instruction::GetField(idx) | Instruction::SetField(idx) => {
                 if *idx as usize >= const_len {
                     return Err(VerifyError::ConstantIndexOob {
-                        proto: proto_idx, pc, index: *idx,
+                        proto: proto_idx,
+                        pc,
+                        index: *idx,
                     });
                 }
             }
@@ -151,7 +171,9 @@ fn structural_checks(
             Instruction::Closure(idx) => {
                 if *idx as usize >= proto_count {
                     return Err(VerifyError::ProtoIndexOob {
-                        proto: proto_idx, pc, index: *idx,
+                        proto: proto_idx,
+                        pc,
+                        index: *idx,
                     });
                 }
             }
@@ -160,7 +182,9 @@ fn structural_checks(
             Instruction::LoadUp(idx) | Instruction::StoreUp(idx) => {
                 if *idx >= proto.upvalue_count {
                     return Err(VerifyError::UpvalueIndexOob {
-                        proto: proto_idx, pc, index: *idx,
+                        proto: proto_idx,
+                        pc,
+                        index: *idx,
                     });
                 }
             }
@@ -198,7 +222,11 @@ fn check_jump_target(
         None => {
             // Compute the raw target for the error message.
             let raw = (pc as isize + 1 + offset as isize) as usize;
-            Err(VerifyError::JumpOutOfRange { proto: proto_idx, pc, target: raw })
+            Err(VerifyError::JumpOutOfRange {
+                proto: proto_idx,
+                pc,
+                target: raw,
+            })
         }
     }
 }
@@ -251,7 +279,10 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
                 let expected = *n as usize;
                 if d != expected {
                     return Err(VerifyError::RetStackMismatch {
-                        proto: proto_idx, pc, expected, got: d,
+                        proto: proto_idx,
+                        pc,
+                        expected,
+                        got: d,
                     });
                 }
                 // No successors.
@@ -259,7 +290,10 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
             Instruction::Error => {
                 // Consumes 1 value, terminal.
                 if d < 1 {
-                    return Err(VerifyError::StackUnderflow { proto: proto_idx, pc });
+                    return Err(VerifyError::StackUnderflow {
+                        proto: proto_idx,
+                        pc,
+                    });
                 }
                 // No successors.
             }
@@ -275,7 +309,10 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
             // --- Conditional jumps (consume condition, branch or fall-through) ---
             Instruction::JmpIf(off) | Instruction::JmpIfNot(off) => {
                 if d < 1 {
-                    return Err(VerifyError::StackUnderflow { proto: proto_idx, pc });
+                    return Err(VerifyError::StackUnderflow {
+                        proto: proto_idx,
+                        pc,
+                    });
                 }
                 let d_out = d - 1;
                 let target = jump_target(pc, *off, code_len).unwrap();
@@ -287,7 +324,10 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
             // --- Short-circuit And / Or (net 0 on both paths) ---
             Instruction::And(off) | Instruction::Or(off) => {
                 if d < 1 {
-                    return Err(VerifyError::StackUnderflow { proto: proto_idx, pc });
+                    return Err(VerifyError::StackUnderflow {
+                        proto: proto_idx,
+                        pc,
+                    });
                 }
                 let target = jump_target(pc, *off, code_len).unwrap();
                 // Both paths keep the value (net 0).
@@ -298,7 +338,10 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
             // --- Iterator init: fall-through net 0 (table→handle), jump net -1 ---
             Instruction::IterInitSorted(off) | Instruction::IterInitArray(off) => {
                 if d < 1 {
-                    return Err(VerifyError::StackUnderflow { proto: proto_idx, pc });
+                    return Err(VerifyError::StackUnderflow {
+                        proto: proto_idx,
+                        pc,
+                    });
                 }
                 let target = jump_target(pc, *off, code_len).unwrap();
                 // Skip path: table popped, nothing pushed.
@@ -311,7 +354,10 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
             // --- Iterator next: fall-through +2 (push key+value), jump -1 (pop handle) ---
             Instruction::IterNext(off) => {
                 if d < 1 {
-                    return Err(VerifyError::StackUnderflow { proto: proto_idx, pc });
+                    return Err(VerifyError::StackUnderflow {
+                        proto: proto_idx,
+                        pc,
+                    });
                 }
                 let target = jump_target(pc, *off, code_len).unwrap();
                 // Exhausted path: handle popped.
@@ -321,7 +367,9 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
                 let d_hit = d + 2;
                 if d_hit > MAX_STACK_DEPTH {
                     return Err(VerifyError::StackOverflow {
-                        proto: proto_idx, pc, depth: d_hit,
+                        proto: proto_idx,
+                        pc,
+                        depth: d_hit,
                     });
                 }
                 schedule(proto_idx, pc + 1, d_hit, &mut depths, &mut worklist)?;
@@ -331,7 +379,10 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
             instr => {
                 let (min_depth, delta) = stack_effect(instr);
                 if d < min_depth {
-                    return Err(VerifyError::StackUnderflow { proto: proto_idx, pc });
+                    return Err(VerifyError::StackUnderflow {
+                        proto: proto_idx,
+                        pc,
+                    });
                 }
                 let d_out = apply_delta(proto_idx, pc, d, delta)?;
                 if pc + 1 <= code_len {
@@ -382,11 +433,18 @@ fn schedule(
 fn apply_delta(proto_idx: u16, pc: usize, d: usize, delta: isize) -> Result<usize, VerifyError> {
     let new_d = d as isize + delta;
     if new_d < 0 {
-        return Err(VerifyError::StackUnderflow { proto: proto_idx, pc });
+        return Err(VerifyError::StackUnderflow {
+            proto: proto_idx,
+            pc,
+        });
     }
     let new_d = new_d as usize;
     if new_d > MAX_STACK_DEPTH {
-        return Err(VerifyError::StackOverflow { proto: proto_idx, pc, depth: new_d });
+        return Err(VerifyError::StackOverflow {
+            proto: proto_idx,
+            pc,
+            depth: new_d,
+        });
     }
     Ok(new_d)
 }
@@ -582,7 +640,10 @@ mod tests {
             Instruction::Jmp(9999),
             Instruction::Ret(0),
         ])]);
-        assert!(matches!(verify(&p), Err(VerifyError::JumpOutOfRange { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::JumpOutOfRange { .. })
+        ));
     }
 
     #[test]
@@ -591,13 +652,20 @@ mod tests {
             Instruction::Jmp(-9999),
             Instruction::Ret(0),
         ])]);
-        assert!(matches!(verify(&p), Err(VerifyError::JumpOutOfRange { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::JumpOutOfRange { .. })
+        ));
     }
 
     #[test]
     fn getfield_const_oob() {
         let p = make_program(vec![proto_with_consts(
-            vec![Instruction::PushNil, Instruction::GetField(100), Instruction::Ret(1)],
+            vec![
+                Instruction::PushNil,
+                Instruction::GetField(100),
+                Instruction::Ret(1),
+            ],
             vec![Constant::Integer(0)],
         )]);
         assert!(matches!(
@@ -634,7 +702,10 @@ mod tests {
             ],
             vec![],
         )]);
-        assert!(matches!(verify(&p), Err(VerifyError::JumpOutOfRange { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::JumpOutOfRange { .. })
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -648,7 +719,10 @@ mod tests {
             Instruction::Pop,
             Instruction::Ret(0),
         ])]);
-        assert!(matches!(verify(&p), Err(VerifyError::StackUnderflow { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::StackUnderflow { .. })
+        ));
     }
 
     #[test]
@@ -658,7 +732,10 @@ mod tests {
             vec![Instruction::PushK(0), Instruction::Add, Instruction::Ret(1)],
             vec![Constant::Integer(1)],
         )]);
-        assert!(matches!(verify(&p), Err(VerifyError::StackUnderflow { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::StackUnderflow { .. })
+        ));
     }
 
     #[test]
@@ -674,7 +751,10 @@ mod tests {
     fn ret_count_mismatch() {
         // Ret(1) but stack is empty.
         let p = make_program(vec![simple_proto(vec![Instruction::Ret(1)])]);
-        assert!(matches!(verify(&p), Err(VerifyError::RetStackMismatch { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::RetStackMismatch { .. })
+        ));
     }
 
     #[test]
@@ -684,7 +764,10 @@ mod tests {
             vec![Instruction::PushK(0), Instruction::Ret(0)],
             vec![Constant::Integer(0)],
         )]);
-        assert!(matches!(verify(&p), Err(VerifyError::RetStackMismatch { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::RetStackMismatch { .. })
+        ));
     }
 
     #[test]
@@ -698,10 +781,10 @@ mod tests {
         //   2: PushNil       depth 0→1  (only on fall-through)
         //   3: Ret(0)        depth must be 0 on jump path, but 1 on fall-through → mismatch
         let p = make_program(vec![simple_proto(vec![
-            Instruction::PushNil,   // 0: depth 0→1
+            Instruction::PushNil,     // 0: depth 0→1
             Instruction::JmpIfNot(1), // 1: depth 1, fall→2 @0, jump→3 @0
-            Instruction::PushNil,   // 2: depth 0→1
-            Instruction::Ret(0),    // 3: reachable with depth 1 (fall-through) and 0 (jump) → mismatch
+            Instruction::PushNil,     // 2: depth 0→1
+            Instruction::Ret(0), // 3: reachable with depth 1 (fall-through) and 0 (jump) → mismatch
         ])]);
         assert!(matches!(
             verify(&p),
@@ -793,10 +876,10 @@ mod tests {
         // Then Ret(1).
         let p = make_program(vec![proto_with_consts(
             vec![
-                Instruction::PushK(0),  // func
-                Instruction::PushK(0),  // arg1
-                Instruction::PushK(0),  // arg2
-                Instruction::Call(2),   // depth 3 → 1
+                Instruction::PushK(0), // func
+                Instruction::PushK(0), // arg1
+                Instruction::PushK(0), // arg2
+                Instruction::Call(2),  // depth 3 → 1
                 Instruction::Ret(1),
             ],
             vec![Constant::Integer(0)],
@@ -813,11 +896,11 @@ mod tests {
         // Let's just check: PushNil (func), PushNil (arg), PCall(1), depth = 2, Ret...
         // PCall(argc=1): net = 1 - 1 = 0, so depth stays at 2. Pop to get 1, Ret(1).
         let p = make_program(vec![simple_proto(vec![
-            Instruction::PushNil,   // func  depth 0→1
-            Instruction::PushNil,   // arg   depth 1→2
-            Instruction::PCall(1),  // depth 2→2 (net 0: pops 2, pushes 2)
-            Instruction::Pop,       // pop one of the two results → depth 1
-            Instruction::Ret(1),    // depth 1 ✓
+            Instruction::PushNil,  // func  depth 0→1
+            Instruction::PushNil,  // arg   depth 1→2
+            Instruction::PCall(1), // depth 2→2 (net 0: pops 2, pushes 2)
+            Instruction::Pop,      // pop one of the two results → depth 1
+            Instruction::Ret(1),   // depth 1 ✓
         ])]);
         assert_eq!(verify(&p), Ok(()));
     }
@@ -847,13 +930,13 @@ mod tests {
     #[test]
     fn iter_init_sorted_ok() {
         let p = make_program(vec![simple_proto(vec![
-            Instruction::PushNil,            // 0: d=0→1
-            Instruction::IterInitSorted(4),  // 1: fall→2@1, jump→6@0
-            Instruction::IterNext(3),        // 2: fall→3@3, jump→6@0
-            Instruction::Pop,                // 3: d=3→2
-            Instruction::Pop,                // 4: d=2→1
-            Instruction::Jmp(-4),            // 5: → pc(5)+1-4 = 2 @ d=1 ✓
-            Instruction::Ret(0),             // 6: d=0 ✓
+            Instruction::PushNil,           // 0: d=0→1
+            Instruction::IterInitSorted(4), // 1: fall→2@1, jump→6@0
+            Instruction::IterNext(3),       // 2: fall→3@3, jump→6@0
+            Instruction::Pop,               // 3: d=3→2
+            Instruction::Pop,               // 4: d=2→1
+            Instruction::Jmp(-4),           // 5: → pc(5)+1-4 = 2 @ d=1 ✓
+            Instruction::Ret(0),            // 6: d=0 ✓
         ])]);
         assert_eq!(verify(&p), Ok(()));
     }
@@ -862,13 +945,13 @@ mod tests {
     fn iter_init_array_ok() {
         // Same shape with IterInitArray.
         let p = make_program(vec![simple_proto(vec![
-            Instruction::PushNil,           // 0: d=0→1
-            Instruction::IterInitArray(4),  // 1: fall→2@1, jump→6@0
-            Instruction::IterNext(3),       // 2: fall→3@3, jump→6@0
-            Instruction::Pop,               // 3: d=3→2
-            Instruction::Pop,               // 4: d=2→1
-            Instruction::Jmp(-4),           // 5: → pc 2 @ d=1 ✓
-            Instruction::Ret(0),            // 6: d=0 ✓
+            Instruction::PushNil,          // 0: d=0→1
+            Instruction::IterInitArray(4), // 1: fall→2@1, jump→6@0
+            Instruction::IterNext(3),      // 2: fall→3@3, jump→6@0
+            Instruction::Pop,              // 3: d=3→2
+            Instruction::Pop,              // 4: d=2→1
+            Instruction::Jmp(-4),          // 5: → pc 2 @ d=1 ✓
+            Instruction::Ret(0),           // 6: d=0 ✓
         ])]);
         assert_eq!(verify(&p), Ok(()));
     }
@@ -938,7 +1021,10 @@ mod tests {
             Instruction::Ret(0),            // 4: (unreachable from init-hit path)
             Instruction::Ret(0),            // 5: d=0 ✓
         ])]);
-        assert!(matches!(verify(&p), Err(VerifyError::RetStackMismatch { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::RetStackMismatch { .. })
+        ));
     }
 
     #[test]
@@ -959,15 +1045,18 @@ mod tests {
         // 3: Pop  4: Pop  5: Jmp(-4)
         // 6: Ret(1)               d=0 but expected 1 → RetStackMismatch
         let p = make_program(vec![simple_proto(vec![
-            Instruction::PushNil,            // 0
-            Instruction::IterInitSorted(4),  // 1: fall→2@1, jump→6@0
-            Instruction::IterNext(3),        // 2: fall→3@3, jump→6@0
-            Instruction::Pop,                // 3
-            Instruction::Pop,                // 4
-            Instruction::Jmp(-4),            // 5: → pc 2 @ d=1
-            Instruction::Ret(1),             // 6: d=0 but Ret(1) expected 1 → mismatch
+            Instruction::PushNil,           // 0
+            Instruction::IterInitSorted(4), // 1: fall→2@1, jump→6@0
+            Instruction::IterNext(3),       // 2: fall→3@3, jump→6@0
+            Instruction::Pop,               // 3
+            Instruction::Pop,               // 4
+            Instruction::Jmp(-4),           // 5: → pc 2 @ d=1
+            Instruction::Ret(1),            // 6: d=0 but Ret(1) expected 1 → mismatch
         ])]);
-        assert!(matches!(verify(&p), Err(VerifyError::RetStackMismatch { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::RetStackMismatch { .. })
+        ));
     }
 
     #[test]
@@ -1003,7 +1092,11 @@ mod tests {
         // Proto 0 (top-level) references proto 1 (inner function) — valid DAG.
         let inner = simple_proto(vec![Instruction::Ret(0)]);
         let outer = proto_with_consts(
-            vec![Instruction::Closure(1), Instruction::Pop, Instruction::Ret(0)],
+            vec![
+                Instruction::Closure(1),
+                Instruction::Pop,
+                Instruction::Ret(0),
+            ],
             vec![Constant::Proto(1)],
         );
         let p = make_program(vec![outer, inner]);
@@ -1014,10 +1107,17 @@ mod tests {
     fn proto_dag_cycle() {
         // Proto 0 has Constant::Proto(0) → self-reference → cycle.
         let proto = proto_with_consts(
-            vec![Instruction::Closure(0), Instruction::Pop, Instruction::Ret(0)],
+            vec![
+                Instruction::Closure(0),
+                Instruction::Pop,
+                Instruction::Ret(0),
+            ],
             vec![Constant::Proto(0)],
         );
         let p = make_program(vec![proto]);
-        assert!(matches!(verify(&p), Err(VerifyError::PrototypeCycle { .. })));
+        assert!(matches!(
+            verify(&p),
+            Err(VerifyError::PrototypeCycle { .. })
+        ));
     }
 }

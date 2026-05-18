@@ -54,50 +54,79 @@ fn s(text: &str) -> LuaValue {
 #[test]
 fn gas_used_is_nonzero_for_simple_program() {
     let out = run_ok("return 1 + 2");
-    assert!(out.gas_used > 0, "expected gas_used > 0, got {}", out.gas_used);
+    assert!(
+        out.gas_used > 0,
+        "expected gas_used > 0, got {}",
+        out.gas_used
+    );
 }
 
 #[test]
 fn gas_used_increases_with_more_work() {
     let cheap = run_ok("return 1").gas_used;
-    let expensive = run_ok(r#"
+    let expensive = run_ok(
+        r#"
         local s = 0
         for i = 1, 100 do
             s = s + i
         end
         return s
-    "#).gas_used;
-    assert!(expensive > cheap, "more work should use more gas: cheap={} expensive={}", cheap, expensive);
+    "#,
+    )
+    .gas_used;
+    assert!(
+        expensive > cheap,
+        "more work should use more gas: cheap={} expensive={}",
+        cheap,
+        expensive
+    );
 }
 
 #[test]
 fn gas_limit_exhaustion_halts_execution() {
-    let config = VmConfig { gas_limit: 10, ..VmConfig::default() };
-    let err = run_with_config(r#"
+    let config = VmConfig {
+        gas_limit: 10,
+        ..VmConfig::default()
+    };
+    let err = run_with_config(
+        r#"
         local i = 0
         while true do i = i + 1 end
-    "#, config).unwrap_err();
+    "#,
+        config,
+    )
+    .unwrap_err();
     assert_eq!(err, VmError::GasExhausted);
 }
 
 #[test]
 fn gas_exhaustion_escapes_pcall() {
     // GasExhausted is unrecoverable — pcall must not swallow it.
-    let config = VmConfig { gas_limit: 40, ..VmConfig::default() };
-    let err = run_with_config(r#"
+    let config = VmConfig {
+        gas_limit: 40,
+        ..VmConfig::default()
+    };
+    let err = run_with_config(
+        r#"
         local ok, err = pcall(function()
             local i = 0
             while true do i = i + 1 end
         end)
         return ok
-    "#, config).unwrap_err();
+    "#,
+        config,
+    )
+    .unwrap_err();
     assert_eq!(err, VmError::GasExhausted);
 }
 
 #[test]
 fn gas_used_reported_in_vmoutput() {
     // gas_used field should reflect actual consumption (not always equal to limit).
-    let config = VmConfig { gas_limit: 200_000, ..VmConfig::default() };
+    let config = VmConfig {
+        gas_limit: 200_000,
+        ..VmConfig::default()
+    };
     let out = run_with_config("return 42", config).unwrap();
     assert!(out.gas_used < 200_000, "gas_used should be less than limit");
     assert!(out.gas_used > 0);
@@ -108,29 +137,44 @@ fn gas_used_reported_in_vmoutput() {
 #[test]
 fn memory_used_is_nonzero_for_table_alloc() {
     let out = run_ok("local t = {} return 1");
-    assert!(out.memory_used > 0, "expected memory_used > 0, got {}", out.memory_used);
+    assert!(
+        out.memory_used > 0,
+        "expected memory_used > 0, got {}",
+        out.memory_used
+    );
 }
 
 #[test]
 fn memory_limit_exhaustion_halts_execution() {
     // Allocating many tables in a loop should exceed a tight memory limit.
-    let config = VmConfig { memory_limit_bytes: 500, ..VmConfig::default() };
-    let err = run_with_config(r#"
+    let config = VmConfig {
+        memory_limit_bytes: 500,
+        ..VmConfig::default()
+    };
+    let err = run_with_config(
+        r#"
         local i = 0
         while true do
             local t = {}
             i = i + 1
         end
         return i
-    "#, config).unwrap_err();
+    "#,
+        config,
+    )
+    .unwrap_err();
     assert_eq!(err, VmError::MemoryExhausted);
 }
 
 #[test]
 fn memory_exhaustion_escapes_pcall() {
     // MemoryExhausted is unrecoverable — pcall must not swallow it.
-    let config = VmConfig { memory_limit_bytes: 500, ..VmConfig::default() };
-    let err = run_with_config(r#"
+    let config = VmConfig {
+        memory_limit_bytes: 500,
+        ..VmConfig::default()
+    };
+    let err = run_with_config(
+        r#"
         local ok, err = pcall(function()
             local i = 0
             while true do
@@ -139,7 +183,10 @@ fn memory_exhaustion_escapes_pcall() {
             end
         end)
         return ok
-    "#, config).unwrap_err();
+    "#,
+        config,
+    )
+    .unwrap_err();
     assert_eq!(err, VmError::MemoryExhausted);
 }
 
@@ -147,17 +194,28 @@ fn memory_exhaustion_escapes_pcall() {
 fn memory_is_monotonic_hwm() {
     // String concatenation allocates a new string each iteration.
     // Because HWM is monotonic (no free credit), memory_used grows with each concat.
-    let config = VmConfig { memory_limit_bytes: 1_000_000, ..VmConfig::default() };
-    let out = run_with_config(r#"
+    let config = VmConfig {
+        memory_limit_bytes: 1_000_000,
+        ..VmConfig::default()
+    };
+    let out = run_with_config(
+        r#"
         local i = 0
         while i < 50 do
             local s = "prefix-" .. tostring(i)
             i = i + 1
         end
         return i
-    "#, config).unwrap();
+    "#,
+        config,
+    )
+    .unwrap();
     // 50 iterations × ~(24 + 9 bytes per concat result) ≈ 1650 bytes, well above 1000.
-    assert!(out.memory_used > 1000, "expected meaningful memory use, got {}", out.memory_used);
+    assert!(
+        out.memory_used > 1000,
+        "expected meaningful memory use, got {}",
+        out.memory_used
+    );
 }
 
 // ── pcall error taxonomy ──────────────────────────────────────────────────────
@@ -173,7 +231,11 @@ fn pcall_catches_call_depth_exceeded() {
         if ok then return 1 else return 0 end
     "#;
     let out = run_ok(src);
-    assert_eq!(out.return_value, int(0), "pcall should have caught CallDepthExceeded");
+    assert_eq!(
+        out.return_value,
+        int(0),
+        "pcall should have caught CallDepthExceeded"
+    );
 }
 
 #[test]
@@ -190,7 +252,8 @@ fn pcall_call_depth_error_message_contains_depth() {
         let msg = String::from_utf8_lossy(s.as_bytes());
         assert!(
             msg.contains("depth") || msg.contains("stack") || msg.contains("call"),
-            "error message should mention depth/stack/call, got: {}", msg
+            "error message should mention depth/stack/call, got: {}",
+            msg
         );
     } else {
         panic!("expected string error message, got {:?}", out.return_value);
@@ -315,8 +378,14 @@ fn determinism_same_gas_used_both_runs() {
     let mut vm2 = Vm::new(VmConfig::default(), NoopHost);
     let out2 = vm2.execute(&program, LuaValue::Nil).expect("run 2 failed");
 
-    assert_eq!(out1.gas_used, out2.gas_used, "gas_used must be deterministic");
-    assert_eq!(out1.memory_used, out2.memory_used, "memory_used must be deterministic");
+    assert_eq!(
+        out1.gas_used, out2.gas_used,
+        "gas_used must be deterministic"
+    );
+    assert_eq!(
+        out1.memory_used, out2.memory_used,
+        "memory_used must be deterministic"
+    );
 }
 
 #[test]
@@ -549,23 +618,27 @@ fn vmoutput_gas_used_plus_remaining_equals_limit() {
     // We can verify indirectly: run two programs, the one with more
     // instructions must have higher gas_used.
     let out_light = run_ok("return 1");
-    let out_heavy = run_ok(r#"
+    let out_heavy = run_ok(
+        r#"
         local s = 0
         for i = 1, 20 do s = s + i end
         return s
-    "#);
+    "#,
+    );
     assert!(out_heavy.gas_used > out_light.gas_used);
 }
 
 #[test]
 fn vmoutput_memory_used_grows_with_allocations() {
     let out_no_alloc = run_ok("return 1");
-    let out_with_alloc = run_ok(r#"
+    let out_with_alloc = run_ok(
+        r#"
         local t1 = {}
         local t2 = {}
         local t3 = {}
         return 1
-    "#);
+    "#,
+    );
     assert!(out_with_alloc.memory_used > out_no_alloc.memory_used);
 }
 
@@ -597,21 +670,32 @@ fn error_code_runtime_error_is_recoverable() {
 
 #[test]
 fn error_code_gas_exhausted_is_unrecoverable() {
-    let config = VmConfig { gas_limit: 20, ..VmConfig::default() };
-    let err = run_with_config(r#"
+    let config = VmConfig {
+        gas_limit: 20,
+        ..VmConfig::default()
+    };
+    let err = run_with_config(
+        r#"
         local ok, _ = pcall(function()
             local i = 0
             while true do i = i + 1 end
         end)
         return 1
-    "#, config).unwrap_err();
+    "#,
+        config,
+    )
+    .unwrap_err();
     assert_eq!(err, VmError::GasExhausted);
 }
 
 #[test]
 fn error_code_memory_exhausted_is_unrecoverable() {
-    let config = VmConfig { memory_limit_bytes: 200, ..VmConfig::default() };
-    let err = run_with_config(r#"
+    let config = VmConfig {
+        memory_limit_bytes: 200,
+        ..VmConfig::default()
+    };
+    let err = run_with_config(
+        r#"
         local ok, _ = pcall(function()
             local i = 0
             while true do
@@ -620,7 +704,10 @@ fn error_code_memory_exhausted_is_unrecoverable() {
             end
         end)
         return 1
-    "#, config).unwrap_err();
+    "#,
+        config,
+    )
+    .unwrap_err();
     assert_eq!(err, VmError::MemoryExhausted);
 }
 
@@ -666,18 +753,20 @@ impl TlsCapturingHost {
     }
 
     fn https_get(url: &str) -> Result<(u16, String, TlsAttestationRecord), String> {
-        use std::io::{BufRead, BufReader, Read, Write};
-        use std::net::TcpStream;
-        use std::sync::{Arc, Mutex};
+        use rustls::RootCertStore;
         use rustls::client::danger::{
             HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
         };
         use rustls::pki_types::ServerName;
-        use rustls::RootCertStore;
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpStream;
+        use std::sync::{Arc, Mutex};
 
         // Only handle https://
         if !url.starts_with("https://") {
-            return Err(format!("TlsCapturingHost only supports https://, got: {url}"));
+            return Err(format!(
+                "TlsCapturingHost only supports https://, got: {url}"
+            ));
         }
 
         let without_scheme = &url["https://".len()..];
@@ -690,7 +779,9 @@ impl TlsCapturingHost {
             None => host_port,
         };
         let port: u16 = match host_port.find(':') {
-            Some(i) => host_port[i + 1..].parse().map_err(|e| format!("bad port: {e}"))?,
+            Some(i) => host_port[i + 1..]
+                .parse()
+                .map_err(|e| format!("bad port: {e}"))?,
             None => 443,
         };
 
@@ -700,7 +791,11 @@ impl TlsCapturingHost {
 
         // Build Mozilla root store.
         let root_store = RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().map(Into::into).collect(),
+            roots: webpki_roots::TLS_SERVER_ROOTS
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
         };
 
         // Build a custom verifier that captures cert chain bytes.
@@ -720,7 +815,11 @@ impl TlsCapturingHost {
                 now: rustls::pki_types::UnixTime,
             ) -> Result<ServerCertVerified, rustls::Error> {
                 let result = self.inner.verify_server_cert(
-                    end_entity, intermediates, server_name, ocsp, now,
+                    end_entity,
+                    intermediates,
+                    server_name,
+                    ocsp,
+                    now,
                 )?;
                 let mut chain = vec![end_entity.as_ref().to_vec()];
                 chain.extend(intermediates.iter().map(|c| c.as_ref().to_vec()));
@@ -751,11 +850,9 @@ impl TlsCapturingHost {
             }
         }
 
-        let inner_verifier = rustls::client::WebPkiServerVerifier::builder(
-            Arc::new(root_store),
-        )
-        .build()
-        .map_err(|e| format!("verifier build error: {e}"))?;
+        let inner_verifier = rustls::client::WebPkiServerVerifier::builder(Arc::new(root_store))
+            .build()
+            .map_err(|e| format!("verifier build error: {e}"))?;
 
         let verifier = Arc::new(CapturingVerifier {
             inner: inner_verifier,
@@ -770,8 +867,8 @@ impl TlsCapturingHost {
         let server_name: ServerName<'static> = ServerName::try_from(host.to_string())
             .map_err(|e| format!("invalid server name: {e}"))?;
 
-        let tcp = TcpStream::connect((host, port))
-            .map_err(|e| format!("TCP connect failed: {e}"))?;
+        let tcp =
+            TcpStream::connect((host, port)).map_err(|e| format!("TCP connect failed: {e}"))?;
         tcp.set_read_timeout(Some(std::time::Duration::from_secs(15)))
             .map_err(|e| format!("set_read_timeout: {e}"))?;
 
@@ -788,12 +885,15 @@ impl TlsCapturingHost {
 
         // Read the response.
         let mut raw = Vec::new();
-        tls.read_to_end(&mut raw).map_err(|e| format!("read error: {e}"))?;
+        tls.read_to_end(&mut raw)
+            .map_err(|e| format!("read error: {e}"))?;
 
         // Parse status line.
         let mut reader = BufReader::new(raw.as_slice());
         let mut status_line = String::new();
-        reader.read_line(&mut status_line).map_err(|e| format!("read status: {e}"))?;
+        reader
+            .read_line(&mut status_line)
+            .map_err(|e| format!("read status: {e}"))?;
         let status: u16 = status_line
             .split_whitespace()
             .nth(1)
@@ -803,7 +903,9 @@ impl TlsCapturingHost {
         // Skip headers.
         loop {
             let mut line = String::new();
-            reader.read_line(&mut line).map_err(|e| format!("read header: {e}"))?;
+            reader
+                .read_line(&mut line)
+                .map_err(|e| format!("read header: {e}"))?;
             if line == "\r\n" || line.is_empty() {
                 break;
             }
@@ -811,7 +913,9 @@ impl TlsCapturingHost {
 
         // Read body.
         let mut body = String::new();
-        reader.read_to_string(&mut body).map_err(|e| format!("read body: {e}"))?;
+        reader
+            .read_to_string(&mut body)
+            .map_err(|e| format!("read body: {e}"))?;
 
         // Build attestation record.
         let chain = captured.lock().unwrap().clone();
@@ -843,30 +947,29 @@ fn extract_not_after_from_der(cert_der: &[u8]) -> u64 {
     use x509_cert::Certificate;
     use x509_cert::der::Decode;
     match Certificate::from_der(cert_der) {
-        Ok(cert) => cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs(),
+        Ok(cert) => cert
+            .tbs_certificate
+            .validity
+            .not_after
+            .to_unix_duration()
+            .as_secs(),
         Err(_) => 0,
     }
 }
 
 impl HostInterface for TlsCapturingHost {
-    fn call_tool(
-        &mut self,
-        name: &str,
-        args: &LuaTable,
-    ) -> Result<LuaTable, String> {
+    fn call_tool(&mut self, name: &str, args: &LuaTable) -> Result<LuaTable, String> {
         match name {
             "http_get" => {
                 let url = match args.get(&str_key("url")) {
-                    Some(LuaValue::String(s)) => {
-                        String::from_utf8_lossy(s.as_bytes()).to_string()
-                    }
+                    Some(LuaValue::String(s)) => String::from_utf8_lossy(s.as_bytes()).to_string(),
                     _ => return Err("http_get: missing string arg 'url'".into()),
                 };
-                let (status, body, attestation) =
-                    TlsCapturingHost::https_get(&url)?;
+                let (status, body, attestation) = TlsCapturingHost::https_get(&url)?;
                 self.attestations.lock().unwrap().push(attestation);
                 let mut t = LuaTable::new();
-                t.rawset(str_key("status"), LuaValue::Integer(status as i64)).unwrap();
+                t.rawset(str_key("status"), LuaValue::Integer(status as i64))
+                    .unwrap();
                 t.rawset(
                     str_key("body"),
                     LuaValue::String(LuaString::from_str(&body)),
@@ -888,11 +991,7 @@ struct NonTlsStubHost {
 }
 
 impl HostInterface for NonTlsStubHost {
-    fn call_tool(
-        &mut self,
-        name: &str,
-        _args: &LuaTable,
-    ) -> Result<LuaTable, String> {
+    fn call_tool(&mut self, name: &str, _args: &LuaTable) -> Result<LuaTable, String> {
         match name {
             "http_get" => {
                 // Record an unavailable attestation (plain HTTP / no P-256).
@@ -902,11 +1001,8 @@ impl HostInterface for NonTlsStubHost {
                     .push(TlsAttestationRecord::unavailable());
                 let mut t = LuaTable::new();
                 t.rawset(str_key("status"), LuaValue::Integer(200)).unwrap();
-                t.rawset(
-                    str_key("body"),
-                    LuaValue::String(LuaString::from_str("ok")),
-                )
-                .unwrap();
+                t.rawset(str_key("body"), LuaValue::String(LuaString::from_str("ok")))
+                    .unwrap();
                 Ok(t)
             }
             other => Err(format!("unknown tool '{other}'")),
@@ -925,7 +1021,9 @@ fn run_with_host<H: HostInterface>(
     let program = compile(&block).expect("compile failed");
     verify(&program).expect("verify failed");
     let mut vm = Vm::new(VmConfig::default(), host);
-    let output = vm.execute(&program, LuaValue::Nil).expect("execution failed");
+    let output = vm
+        .execute(&program, LuaValue::Nil)
+        .expect("execution failed");
     let records = attestations.lock().unwrap().clone();
     (output, records)
 }
@@ -949,31 +1047,38 @@ fn tls_attestation_nonzero_for_p256() {
     let (output, records) = run_with_host(src, host, attestations);
 
     // Verify hostname and cert_not_after are populated.
-    assert_eq!(records[0].hostname, "example.com", "hostname must be captured from URL");
-    assert!(records[0].cert_not_after > 0, "cert_not_after must be non-zero for a real cert");
+    assert_eq!(
+        records[0].hostname, "example.com",
+        "hostname must be captured from URL"
+    );
+    assert!(
+        records[0].cert_not_after > 0,
+        "cert_not_after must be non-zero for a real cert"
+    );
 
     // Verify via `compute_tls_attestation_hash` directly.
     let hash = compute_tls_attestation_hash(&records);
     assert_ne!(
-        hash,
-        [0u8; 32],
+        hash, [0u8; 32],
         "expected non-zero tls_attestation_hash for P-256 server (got records: {records:?})"
     );
 
     // Also verify end-to-end through `PublicInputs` (the full prove pipeline).
     #[cfg(feature = "zkvm")]
     {
-        use luai::{
-            host::tape::OracleTape,
-            zkvm::commitment::compute_public_inputs,
-        };
+        use luai::{host::tape::OracleTape, zkvm::commitment::compute_public_inputs};
         let block = parse(src).expect("parse failed");
         let program = compile(&block).expect("compile failed");
         let oracle_tape = OracleTape::from_records(&output.transcript);
-        let pi = compute_public_inputs(program.program_hash, &LuaValue::Nil, &oracle_tape, &output, &records);
+        let pi = compute_public_inputs(
+            program.program_hash,
+            &LuaValue::Nil,
+            &oracle_tape,
+            &output,
+            &records,
+        );
         assert_ne!(
-            pi.tls_attestation_hash,
-            [0u8; 32],
+            pi.tls_attestation_hash, [0u8; 32],
             "PublicInputs.tls_attestation_hash must be non-zero for P-256 server"
         );
     }
@@ -990,31 +1095,34 @@ fn tls_degrades_cleanly_for_non_p256() {
     "#;
 
     let attestations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let host = NonTlsStubHost { attestations: attestations.clone() };
+    let host = NonTlsStubHost {
+        attestations: attestations.clone(),
+    };
     let (output, records) = run_with_host(src, host, attestations);
 
     // All attestations are unavailable → hash must be zero.
     let hash = compute_tls_attestation_hash(&records);
     assert_eq!(
-        hash,
-        [0u8; 32],
+        hash, [0u8; 32],
         "expected zero tls_attestation_hash when no P-256 attestation is available"
     );
 
     // Also verify end-to-end through `PublicInputs`.
     #[cfg(feature = "zkvm")]
     {
-        use luai::{
-            host::tape::OracleTape,
-            zkvm::commitment::compute_public_inputs,
-        };
+        use luai::{host::tape::OracleTape, zkvm::commitment::compute_public_inputs};
         let block = parse(src).expect("parse failed");
         let program = compile(&block).expect("compile failed");
         let oracle_tape = OracleTape::from_records(&output.transcript);
-        let pi = compute_public_inputs(program.program_hash, &LuaValue::Nil, &oracle_tape, &output, &records);
+        let pi = compute_public_inputs(
+            program.program_hash,
+            &LuaValue::Nil,
+            &oracle_tape,
+            &output,
+            &records,
+        );
         assert_eq!(
-            pi.tls_attestation_hash,
-            [0u8; 32],
+            pi.tls_attestation_hash, [0u8; 32],
             "PublicInputs.tls_attestation_hash must be zero when no P-256 attestation"
         );
     }
@@ -1044,15 +1152,23 @@ fn tls_reverify_attestations_matches_prover() {
     assert_eq!(verified.len(), 1);
 
     let r = &verified[0];
-    assert!(r.p256_verified, "reverify_attestations must accept a real P-256 example.com cert");
-    assert_eq!(r.hostname, "example.com", "hostname must be preserved through reverification");
-    assert!(r.cert_not_after > 0, "cert_not_after must be extracted from the cert DER");
+    assert!(
+        r.p256_verified,
+        "reverify_attestations must accept a real P-256 example.com cert"
+    );
+    assert_eq!(
+        r.hostname, "example.com",
+        "hostname must be preserved through reverification"
+    );
+    assert!(
+        r.cert_not_after > 0,
+        "cert_not_after must be extracted from the cert DER"
+    );
 
     // Guest re-derives cert_not_after from the DER; it must agree with the
     // prover's independently extracted value.
     assert_eq!(
-        r.cert_not_after,
-        prover_record.cert_not_after,
+        r.cert_not_after, prover_record.cert_not_after,
         "guest and prover must derive the same cert_not_after from the same cert DER"
     );
 }

@@ -1,5 +1,10 @@
 #[cfg(not(feature = "std"))]
-use alloc::{format, string::{String, ToString}, vec, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 
 use super::error::CompileError;
 use super::proto::{Constant, FunctionProto, Instruction, UpvalueDesc};
@@ -174,7 +179,9 @@ impl Compiler {
     }
 
     fn push_break_scope(&mut self, extra_pops: usize) {
-        self.current_scope_mut().break_patches.push((extra_pops, Vec::new()));
+        self.current_scope_mut()
+            .break_patches
+            .push((extra_pops, Vec::new()));
     }
 
     fn pop_break_scope(&mut self) -> Vec<usize> {
@@ -640,8 +647,8 @@ impl Compiler {
         let v_slot = self.declare_local(&val_name, val_span.line)?;
 
         // IterNext pushes key then value (value on top).
-        self.emit(Instruction::StoreLocal(v_slot), line);  // pop value (top) → v
-        self.emit(Instruction::StoreLocal(k_slot), line);  // pop key → k
+        self.emit(Instruction::StoreLocal(v_slot), line); // pop value (top) → v
+        self.emit(Instruction::StoreLocal(k_slot), line); // pop key → k
 
         self.compile_block(&f.block)?;
 

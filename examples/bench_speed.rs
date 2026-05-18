@@ -40,19 +40,27 @@ fn run_bench(name: &str, src: &str, iters: u32) {
 fn main() {
     println!("=== luai (Rust) ===");
 
-    run_bench("loop-100k", r#"
+    run_bench(
+        "loop-100k",
+        r#"
 local sum = 0
 for i = 1, 100000 do
     sum = sum + i
 end
 return sum
-"#, 100);
+"#,
+        100,
+    );
 
-    run_bench("fib(28)", r#"
+    run_bench(
+        "fib(28)",
+        r#"
 local function fib(n)
     if n <= 1 then return n end
     return fib(n-1) + fib(n-2)
 end
 return fib(28)
-"#, 10);
+"#,
+        10,
+    );
 }

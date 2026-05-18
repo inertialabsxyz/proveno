@@ -2,7 +2,7 @@
 
 use crate::{
     host::{
-        canonicalize::{canonical_serialize_table, CanonError},
+        canonicalize::{CanonError, canonical_serialize_table},
         transcript::Transcript,
     },
     types::{
@@ -62,16 +62,16 @@ impl<H: HostInterface> ToolRegistry<H> {
 
         // 2. Check call count quota.
         if self.calls_made >= config.max_tool_calls {
-            return Err(VmError::RuntimeError(LuaValue::String(LuaString::from_str(
-                "tool call limit exceeded",
-            ))));
+            return Err(VmError::RuntimeError(LuaValue::String(
+                LuaString::from_str("tool call limit exceeded"),
+            )));
         }
 
         // 3. Check bytes-in quota.
         if self.total_bytes_in + args_canonical.len() > config.max_tool_bytes_in {
-            return Err(VmError::RuntimeError(LuaValue::String(LuaString::from_str(
-                "tool input bytes limit exceeded",
-            ))));
+            return Err(VmError::RuntimeError(LuaValue::String(
+                LuaString::from_str("tool input bytes limit exceeded"),
+            )));
         }
 
         // 4. Increment counters.
@@ -94,9 +94,9 @@ impl<H: HostInterface> ToolRegistry<H> {
 
                 // 6b. Check bytes-out quota.
                 if self.total_bytes_out + resp_canonical.len() > config.max_tool_bytes_out {
-                    return Err(VmError::RuntimeError(LuaValue::String(LuaString::from_str(
-                        "tool output bytes limit exceeded",
-                    ))));
+                    return Err(VmError::RuntimeError(LuaValue::String(
+                        LuaString::from_str("tool output bytes limit exceeded"),
+                    )));
                 }
 
                 // 6c. Update bytes-out counter.
@@ -142,8 +142,14 @@ mod tests {
     }
 
     impl MockHost {
-        fn ok(t: LuaTable) -> Self { MockHost { response: Ok(t) } }
-        fn err(msg: &str) -> Self { MockHost { response: Err(msg.to_owned()) } }
+        fn ok(t: LuaTable) -> Self {
+            MockHost { response: Ok(t) }
+        }
+        fn err(msg: &str) -> Self {
+            MockHost {
+                response: Err(msg.to_owned()),
+            }
+        }
     }
 
     impl HostInterface for MockHost {
@@ -152,9 +158,15 @@ mod tests {
         }
     }
 
-    fn make_config() -> VmConfig { VmConfig::default() }
-    fn make_gas() -> GasMeter { GasMeter::new(1_000_000) }
-    fn make_empty_table() -> LuaTable { LuaTable::new() }
+    fn make_config() -> VmConfig {
+        VmConfig::default()
+    }
+    fn make_gas() -> GasMeter {
+        GasMeter::new(1_000_000)
+    }
+    fn make_empty_table() -> LuaTable {
+        LuaTable::new()
+    }
 
     fn make_response_table() -> LuaTable {
         let mut t = LuaTable::new();
@@ -185,16 +197,25 @@ mod tests {
     #[test]
     fn max_tool_calls_exceeded() {
         let mut registry = ToolRegistry::new(MockHost::ok(make_empty_table()));
-        let config = VmConfig { max_tool_calls: 2, ..VmConfig::default() };
+        let config = VmConfig {
+            max_tool_calls: 2,
+            ..VmConfig::default()
+        };
         let mut gas = make_gas();
         let mut transcript = Transcript::new();
         let args = make_empty_table();
 
         // First two calls succeed.
-        registry.call("t", &args, &config, &mut gas, &mut transcript).unwrap();
-        registry.call("t", &args, &config, &mut gas, &mut transcript).unwrap();
+        registry
+            .call("t", &args, &config, &mut gas, &mut transcript)
+            .unwrap();
+        registry
+            .call("t", &args, &config, &mut gas, &mut transcript)
+            .unwrap();
         // Third call fails.
-        let err = registry.call("t", &args, &config, &mut gas, &mut transcript).unwrap_err();
+        let err = registry
+            .call("t", &args, &config, &mut gas, &mut transcript)
+            .unwrap_err();
         assert!(matches!(err, VmError::RuntimeError(_)));
         if let VmError::RuntimeError(LuaValue::String(s)) = err {
             assert!(String::from_utf8_lossy(s.as_bytes()).contains("limit exceeded"));
@@ -204,14 +225,19 @@ mod tests {
     #[test]
     fn max_bytes_in_exceeded_before_host_called() {
         // Set bytes_in limit to 1 byte; even empty table {} = 2 bytes > 1.
-        let config = VmConfig { max_tool_bytes_in: 1, ..VmConfig::default() };
+        let config = VmConfig {
+            max_tool_bytes_in: 1,
+            ..VmConfig::default()
+        };
         // Use NoopHost — it should NOT be called.
         let mut registry = ToolRegistry::new(NoopHost);
         let mut gas = make_gas();
         let mut transcript = Transcript::new();
         let args = make_empty_table();
 
-        let err = registry.call("t", &args, &config, &mut gas, &mut transcript).unwrap_err();
+        let err = registry
+            .call("t", &args, &config, &mut gas, &mut transcript)
+            .unwrap_err();
         assert!(matches!(err, VmError::RuntimeError(_)));
         // No transcript entry because we failed before calling host.
         assert_eq!(transcript.len(), 0);
@@ -220,13 +246,18 @@ mod tests {
     #[test]
     fn max_bytes_out_exceeded_after_host_responds() {
         let resp = make_response_table();
-        let config = VmConfig { max_tool_bytes_out: 1, ..VmConfig::default() };
+        let config = VmConfig {
+            max_tool_bytes_out: 1,
+            ..VmConfig::default()
+        };
         let mut registry = ToolRegistry::new(MockHost::ok(resp));
         let mut gas = make_gas();
         let mut transcript = Transcript::new();
         let args = make_empty_table();
 
-        let err = registry.call("t", &args, &config, &mut gas, &mut transcript).unwrap_err();
+        let err = registry
+            .call("t", &args, &config, &mut gas, &mut transcript)
+            .unwrap_err();
         assert!(matches!(err, VmError::RuntimeError(_)));
         if let VmError::RuntimeError(LuaValue::String(s)) = err {
             assert!(String::from_utf8_lossy(s.as_bytes()).contains("output"));
@@ -241,7 +272,9 @@ mod tests {
         let config = make_config();
         let args = make_empty_table();
 
-        let err = registry.call("broken", &args, &config, &mut gas, &mut transcript).unwrap_err();
+        let err = registry
+            .call("broken", &args, &config, &mut gas, &mut transcript)
+            .unwrap_err();
         assert!(matches!(err, VmError::ToolError(_)));
         assert_eq!(transcript.len(), 1);
         assert_eq!(transcript.records()[0].status, ToolCallStatus::Error);
@@ -258,7 +291,9 @@ mod tests {
         let args = make_empty_table();
 
         let initial_gas = gas.used();
-        registry.call("search", &args, &config, &mut gas, &mut transcript).unwrap();
+        registry
+            .call("search", &args, &config, &mut gas, &mut transcript)
+            .unwrap();
         assert!(gas.used() > initial_gas);
         // gas_charged in transcript matches gas used.
         let record = &transcript.records()[0];

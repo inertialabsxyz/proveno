@@ -37,8 +37,13 @@ pub fn build_proof_artifacts(
     let oracle_tape = OracleTape::from_records(&output.transcript);
 
     // Compute public inputs (commitment hashes including TLS attestation)
-    let public_inputs =
-        compute_public_inputs(program.program_hash, input, &oracle_tape, &output, &tls_attestations);
+    let public_inputs = compute_public_inputs(
+        program.program_hash,
+        input,
+        &oracle_tape,
+        &output,
+        &tls_attestations,
+    );
 
     // Assemble DryRunResult
     let dry_run_result = DryRunResult {
@@ -83,13 +88,28 @@ pub fn format_prove_section(artifacts: &ProveArtifacts) -> String {
     let mut out = String::new();
 
     out.push_str("── ZK Proof Artifacts ─────────────────────────\n");
-    out.push_str(&format!("  Program hash:        {}\n", hex(&pi.program_hash)));
+    out.push_str(&format!(
+        "  Program hash:        {}\n",
+        hex(&pi.program_hash)
+    ));
     out.push_str(&format!("  Input hash:          {}\n", hex(&pi.input_hash)));
-    out.push_str(&format!("  Tool responses hash: {}\n", hex(&pi.tool_responses_hash)));
-    out.push_str(&format!("  Output hash:         {}\n", hex(&pi.output_hash)));
+    out.push_str(&format!(
+        "  Tool responses hash: {}\n",
+        hex(&pi.tool_responses_hash)
+    ));
+    out.push_str(&format!(
+        "  Output hash:         {}\n",
+        hex(&pi.output_hash)
+    ));
     out.push('\n');
-    out.push_str(&format!("  Compiled program: {}\n", artifacts.compiled_path.display()));
-    out.push_str(&format!("  Dry run result:   {}\n", artifacts.dry_result_path.display()));
+    out.push_str(&format!(
+        "  Compiled program: {}\n",
+        artifacts.compiled_path.display()
+    ));
+    out.push_str(&format!(
+        "  Dry run result:   {}\n",
+        artifacts.dry_result_path.display()
+    ));
     out.push('\n');
     out.push_str("  Next steps:\n");
     out.push_str(&format!(
@@ -161,14 +181,26 @@ return r1.message
         let dir2 = tempfile::tempdir().unwrap();
 
         let (p1, o1) = run_program("return 1");
-        let a1 = build_proof_artifacts(&p1, &LuaValue::Nil, o1, vec![], dir1.path().to_str().unwrap())
-            .unwrap();
+        let a1 = build_proof_artifacts(
+            &p1,
+            &LuaValue::Nil,
+            o1,
+            vec![],
+            dir1.path().to_str().unwrap(),
+        )
+        .unwrap();
 
         let source = r#"tool.call("echo", {message = "hi"})
 return 1"#;
         let (p2, o2) = run_program(source);
-        let a2 = build_proof_artifacts(&p2, &LuaValue::Nil, o2, vec![], dir2.path().to_str().unwrap())
-            .unwrap();
+        let a2 = build_proof_artifacts(
+            &p2,
+            &LuaValue::Nil,
+            o2,
+            vec![],
+            dir2.path().to_str().unwrap(),
+        )
+        .unwrap();
 
         assert_ne!(
             a1.public_inputs.tool_responses_hash,
@@ -212,8 +244,13 @@ return r.message"#;
         let output =
             pipeline::execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let oracle_tape = OracleTape::from_records(&output.transcript);
-        let pi_orchestrator =
-            compute_public_inputs(program.program_hash, &LuaValue::Nil, &oracle_tape, &output, &[]);
+        let pi_orchestrator = compute_public_inputs(
+            program.program_hash,
+            &LuaValue::Nil,
+            &oracle_tape,
+            &output,
+            &[],
+        );
 
         // Path 2: prover dry_run (no TLS attestations)
         let prover = Prover::new(VmConfig::default(), StubHost, vec!["echo".into()]);

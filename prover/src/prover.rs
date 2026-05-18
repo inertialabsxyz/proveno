@@ -61,8 +61,13 @@ impl<H: HostInterface> Prover<H> {
         let output = vm.execute(program, input.clone())?;
 
         let oracle_tape = OracleTape::from_records(&output.transcript);
-        let public_inputs =
-            compute_public_inputs(program.program_hash, &input, &oracle_tape, &output, &tls_attestations);
+        let public_inputs = compute_public_inputs(
+            program.program_hash,
+            &input,
+            &oracle_tape,
+            &output,
+            &tls_attestations,
+        );
 
         Ok(DryRunResult {
             output,

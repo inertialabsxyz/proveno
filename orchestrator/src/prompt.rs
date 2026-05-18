@@ -183,7 +183,9 @@ mod tests {
         assert!(prompt.contains("Does nothing"));
         // No **Args:** or **Returns:** sections
         let noop_section = prompt.split("### `noop`").nth(1).unwrap();
-        let section_end = noop_section.find("## Output format").unwrap_or(noop_section.len());
+        let section_end = noop_section
+            .find("## Output format")
+            .unwrap_or(noop_section.len());
         let section = &noop_section[..section_end];
         assert!(!section.contains("**Args:**"));
         assert!(!section.contains("**Returns:**"));

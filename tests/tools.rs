@@ -1,6 +1,7 @@
 //! Integration tests for Phase 8: host boundary, transcript, canonical serialization.
 
 use luai::{
+    OracleTape, TapeHost,
     bytecode::verify,
     compiler::compile,
     host::transcript::ToolCallStatus,
@@ -13,7 +14,6 @@ use luai::{
         engine::{HostInterface, Vm, VmConfig},
         gas::VmError,
     },
-    OracleTape, TapeHost,
 };
 
 // ── Mock host ─────────────────────────────────────────────────────────────────
@@ -26,7 +26,10 @@ struct MockHost {
 
 impl MockHost {
     fn new() -> Self {
-        MockHost { responses: Vec::new(), call_index: 0 }
+        MockHost {
+            responses: Vec::new(),
+            call_index: 0,
+        }
     }
 
     fn add_ok(&mut self, tool: &str, t: LuaTable) {
@@ -69,7 +72,8 @@ fn run_with_host(src: &str, host: MockHost, config: VmConfig) -> Result<luai::Vm
 
 fn make_response(key: &str, val: LuaValue) -> LuaTable {
     let mut t = LuaTable::new();
-    t.rawset(LuaKey::String(LuaString::from_str(key)), val).unwrap();
+    t.rawset(LuaKey::String(LuaString::from_str(key)), val)
+        .unwrap();
     t
 }
 
@@ -171,7 +175,10 @@ fn max_tool_calls_quota_enforced() {
         host.add_ok("t", make_simple_response());
     }
 
-    let config = VmConfig { max_tool_calls: 2, ..VmConfig::default() };
+    let config = VmConfig {
+        max_tool_calls: 2,
+        ..VmConfig::default()
+    };
 
     let src = r#"
         tool.call("t", {})
@@ -196,7 +203,10 @@ fn max_tool_bytes_in_quota_enforced() {
     let mut host = MockHost::new();
     host.add_ok("t", make_simple_response());
 
-    let config = VmConfig { max_tool_bytes_in: 1, ..VmConfig::default() };
+    let config = VmConfig {
+        max_tool_bytes_in: 1,
+        ..VmConfig::default()
+    };
 
     let src = r#"
         tool.call("t", {})
@@ -213,7 +223,10 @@ fn max_tool_bytes_out_quota_enforced() {
     // Response will be {"result":42} = 13 bytes, limit to 1.
     host.add_ok("t", make_simple_response());
 
-    let config = VmConfig { max_tool_bytes_out: 1, ..VmConfig::default() };
+    let config = VmConfig {
+        max_tool_bytes_out: 1,
+        ..VmConfig::default()
+    };
 
     let src = r#"
         tool.call("t", {})
@@ -344,7 +357,11 @@ fn gas_charged_for_tool_call() {
     let output = run_with_host(src, host, VmConfig::default()).unwrap();
     // Gas charged must include the base tool call cost.
     let r = &output.transcript[0];
-    assert!(r.gas_charged >= 100, "expected gas_charged >= 100, got {}", r.gas_charged);
+    assert!(
+        r.gas_charged >= 100,
+        "expected gas_charged >= 100, got {}",
+        r.gas_charged
+    );
 }
 
 // ── Tape replay helper ─────────────────────────────────────────────────────────

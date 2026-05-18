@@ -1,7 +1,15 @@
 #[cfg(feature = "std")]
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 #[cfg(not(feature = "std"))]
-use {alloc::{rc::Rc, string::{String, ToString}, sync::Arc, vec::Vec}, core::cell::RefCell};
+use {
+    alloc::{
+        rc::Rc,
+        string::{String, ToString},
+        sync::Arc,
+        vec::Vec,
+    },
+    core::cell::RefCell,
+};
 
 use crate::types::table::{LuaKey, LuaTable};
 pub const MAX_TABLE_ENTRIES: usize = 50_000;
@@ -118,7 +126,6 @@ impl LuaValue {
     pub fn is_truthy(&self) -> bool {
         !matches!(self, LuaValue::Nil | LuaValue::Boolean(false))
     }
-
 }
 
 impl PartialEq for LuaValue {
@@ -688,7 +695,10 @@ mod tests {
             .to_lua_string(),
             ls("function")
         );
-        assert_eq!(LuaValue::Builtin(BuiltinId::Type).to_lua_string(), ls("function"));
+        assert_eq!(
+            LuaValue::Builtin(BuiltinId::Type).to_lua_string(),
+            ls("function")
+        );
     }
 
     // --- to_number_coerce ---

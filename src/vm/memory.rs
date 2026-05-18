@@ -11,7 +11,10 @@ pub struct MemoryMeter {
 
 impl MemoryMeter {
     pub fn new(limit: u64) -> Self {
-        MemoryMeter { allocated: 0, limit }
+        MemoryMeter {
+            allocated: 0,
+            limit,
+        }
     }
 
     /// Add `bytes` to the allocated total.

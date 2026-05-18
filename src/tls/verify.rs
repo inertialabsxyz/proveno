@@ -73,20 +73,18 @@ fn spki_is_p256(cert: &x509_cert::Certificate) -> bool {
     use x509_cert::der::asn1::ObjectIdentifier;
 
     // id-ecPublicKey: 1.2.840.10045.2.1
-    const ID_EC_PUBLIC_KEY: ObjectIdentifier =
-        ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
+    const ID_EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
     // prime256v1 / secp256r1: 1.2.840.10045.3.1.7
-    const SECP256R1: ObjectIdentifier =
-        ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+    const SECP256R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
 
     let spki = &cert.tbs_certificate.subject_public_key_info;
     if spki.algorithm.oid != ID_EC_PUBLIC_KEY {
         return false;
     }
     match &spki.algorithm.parameters {
-        Some(params) => {
-            params.decode_as::<ObjectIdentifier>().map_or(false, |oid| oid == SECP256R1)
-        }
+        Some(params) => params
+            .decode_as::<ObjectIdentifier>()
+            .map_or(false, |oid| oid == SECP256R1),
         None => false,
     }
 }
@@ -167,7 +165,7 @@ fn ecdsa_p256_verify(
 ) -> bool {
     use p256::ecdsa::{Signature, VerifyingKey};
     use rsa::signature::hazmat::PrehashVerifier;
-    use sha2::{Sha256, Sha384, Sha512, Digest};
+    use sha2::{Digest, Sha256, Sha384, Sha512};
     use x509_cert::der::asn1::ObjectIdentifier;
 
     // ecdsa-with-SHA256  1.2.840.10045.4.3.2
@@ -219,7 +217,7 @@ fn ecdsa_p384_verify(
 ) -> bool {
     use p384::ecdsa::{Signature, VerifyingKey};
     use rsa::signature::hazmat::PrehashVerifier;
-    use sha2::{Sha256, Sha384, Sha512, Digest};
+    use sha2::{Digest, Sha256, Sha384, Sha512};
     use x509_cert::der::asn1::ObjectIdentifier;
 
     const SHA256_ECDSA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
@@ -264,9 +262,9 @@ fn verify_cert_sig_rsa(
     sig_alg: x509_cert::der::asn1::ObjectIdentifier,
     issuer: &x509_cert::Certificate,
 ) -> bool {
-    use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey};
     use rsa::pkcs1v15::VerifyingKey;
     use rsa::signature::Verifier;
+    use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey};
     use sha2::{Sha256, Sha384, Sha512};
     use x509_cert::der::asn1::ObjectIdentifier;
 
@@ -415,9 +413,9 @@ fn is_signed_by_mozilla_root(cert_der: &[u8], cert: &x509_cert::Certificate) -> 
                 return true;
             }
         } else if key_alg == RSA_OID {
-            use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey};
             use rsa::pkcs1v15::VerifyingKey;
             use rsa::signature::Verifier;
+            use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey};
             use sha2::{Sha256, Sha384, Sha512};
 
             let rsa_key = match RsaPublicKey::from_pkcs1_der(key_bytes) {
@@ -429,11 +427,17 @@ fn is_signed_by_mozilla_root(cert_der: &[u8], cert: &x509_cert::Certificate) -> 
                 Err(_) => continue,
             };
             let ok = if sig_alg == SHA256_RSA {
-                VerifyingKey::<Sha256>::new(rsa_key).verify(&tbs_der, &sig).is_ok()
+                VerifyingKey::<Sha256>::new(rsa_key)
+                    .verify(&tbs_der, &sig)
+                    .is_ok()
             } else if sig_alg == SHA384_RSA {
-                VerifyingKey::<Sha384>::new(rsa_key).verify(&tbs_der, &sig).is_ok()
+                VerifyingKey::<Sha384>::new(rsa_key)
+                    .verify(&tbs_der, &sig)
+                    .is_ok()
             } else if sig_alg == SHA512_RSA {
-                VerifyingKey::<Sha512>::new(rsa_key).verify(&tbs_der, &sig).is_ok()
+                VerifyingKey::<Sha512>::new(rsa_key)
+                    .verify(&tbs_der, &sig)
+                    .is_ok()
             } else {
                 false
             };
@@ -457,11 +461,9 @@ fn is_signed_by_mozilla_root(cert_der: &[u8], cert: &x509_cert::Certificate) -> 
 ///
 /// `key_bytes` points into `spki_inner` with the leading unused-bits octet
 /// of the BIT STRING stripped.
-fn spki_alg_and_key(
-    spki_inner: &[u8],
-) -> Option<(x509_cert::der::asn1::ObjectIdentifier, &[u8])> {
-    use x509_cert::der::asn1::ObjectIdentifier;
+fn spki_alg_and_key(spki_inner: &[u8]) -> Option<(x509_cert::der::asn1::ObjectIdentifier, &[u8])> {
     use x509_cert::der::Decode;
+    use x509_cert::der::asn1::ObjectIdentifier;
 
     // Minimal hand-rolled DER TLV reader.  Returns (content, remainder).
     fn tl(data: &[u8], tag: u8) -> Option<(&[u8], &[u8])> {
@@ -489,9 +491,9 @@ fn spki_alg_and_key(
 
     // spki_inner already omits the outer SEQUENCE wrapper —
     // parse AlgorithmIdentifier then BIT STRING directly.
-    let (alg_seq, rest) = tl(spki_inner, 0x30)?;  // AlgorithmIdentifier
-    let (oid_bytes, _) = tl(alg_seq, 0x06)?;       // OID
-    let (bs, _) = tl(rest, 0x03)?;                  // BIT STRING
+    let (alg_seq, rest) = tl(spki_inner, 0x30)?; // AlgorithmIdentifier
+    let (oid_bytes, _) = tl(alg_seq, 0x06)?; // OID
+    let (bs, _) = tl(rest, 0x03)?; // BIT STRING
     if bs.is_empty() {
         return None;
     }
@@ -631,7 +633,12 @@ pub fn extract_cert_not_after(cert_der: &[u8]) -> u64 {
     use x509_cert::der::Decode;
 
     match Certificate::from_der(cert_der) {
-        Ok(cert) => cert.tbs_certificate.validity.not_after.to_unix_duration().as_secs(),
+        Ok(cert) => cert
+            .tbs_certificate
+            .validity
+            .not_after
+            .to_unix_duration()
+            .as_secs(),
         Err(_) => 0,
     }
 }
@@ -704,5 +711,4 @@ mod tests {
         assert!(san_contains_hostname(&seq, "example.com"));
         assert!(!san_contains_hostname(&seq, "other.com"));
     }
-
 }

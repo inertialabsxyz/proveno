@@ -179,11 +179,8 @@ impl LiveHost {
         let mut resp = LuaTable::new();
         match self.kv.get(&key) {
             Some(val) => {
-                resp.rawset(
-                    str_key("value"),
-                    LuaValue::String(LuaString::from_str(val)),
-                )
-                .unwrap();
+                resp.rawset(str_key("value"), LuaValue::String(LuaString::from_str(val)))
+                    .unwrap();
             }
             None => {
                 resp.rawset(str_key("value"), LuaValue::Nil).unwrap();
@@ -351,10 +348,7 @@ mod tests {
     #[test]
     fn add_returns_sum() {
         let mut host = StubHost;
-        let args = make_args(&[
-            ("a", LuaValue::Integer(17)),
-            ("b", LuaValue::Integer(25)),
-        ]);
+        let args = make_args(&[("a", LuaValue::Integer(17)), ("b", LuaValue::Integer(25))]);
         let resp = host.call_tool("add", &args).unwrap();
         assert_eq!(resp.get(&str_key("result")), Some(&LuaValue::Integer(42)));
     }
@@ -362,10 +356,7 @@ mod tests {
     #[test]
     fn add_negative_numbers() {
         let mut host = StubHost;
-        let args = make_args(&[
-            ("a", LuaValue::Integer(-10)),
-            ("b", LuaValue::Integer(3)),
-        ]);
+        let args = make_args(&[("a", LuaValue::Integer(-10)), ("b", LuaValue::Integer(3))]);
         let resp = host.call_tool("add", &args).unwrap();
         assert_eq!(resp.get(&str_key("result")), Some(&LuaValue::Integer(-7)));
     }
@@ -494,7 +485,9 @@ mod tests {
     fn make_live_host() -> LiveHost {
         // LlmClient with dummy key — won't be called in KV/time tests
         let llm = LlmClient::new(
-            crate::llm::Backend::Anthropic { api_key: "dummy-key".into() },
+            crate::llm::Backend::Anthropic {
+                api_key: "dummy-key".into(),
+            },
             "dummy-model".into(),
         );
         LiveHost::new(llm)
@@ -676,7 +669,10 @@ pub fn stub_tool_descriptions() -> Vec<crate::prompt::ToolDescription> {
             name: "time_now".into(),
             description: "Returns the current Unix timestamp.".into(),
             args: vec![],
-            returns: vec![("timestamp".into(), "integer — Unix timestamp in seconds".into())],
+            returns: vec![(
+                "timestamp".into(),
+                "integer — Unix timestamp in seconds".into(),
+            )],
         },
     ]
 }

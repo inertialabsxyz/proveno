@@ -1,8 +1,8 @@
 use crate::types::value::{LuaError, LuaString, LuaValue, MAX_TABLE_ENTRIES};
-#[cfg(feature = "std")]
-use std::collections::BTreeMap;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
+#[cfg(feature = "std")]
+use std::collections::BTreeMap;
 
 //
 // | Key Type  | Order                        |
@@ -33,8 +33,8 @@ mod serde_key {
             match self {
                 LuaKey::Integer(n) => s.serialize_str(&format!("i:{n}")),
                 LuaKey::String(st) => {
-                    let text = core::str::from_utf8(st.as_bytes())
-                        .map_err(serde::ser::Error::custom)?;
+                    let text =
+                        core::str::from_utf8(st.as_bytes()).map_err(serde::ser::Error::custom)?;
                     s.serialize_str(&format!("s:{text}"))
                 }
                 LuaKey::Boolean(b) => s.serialize_str(&format!("b:{b}")),
@@ -54,9 +54,7 @@ mod serde_key {
                 let b: bool = rest.parse().map_err(de::Error::custom)?;
                 Ok(LuaKey::Boolean(b))
             } else {
-                Err(de::Error::custom(format!(
-                    "invalid LuaKey format: {raw}"
-                )))
+                Err(de::Error::custom(format!("invalid LuaKey format: {raw}")))
             }
         }
     }

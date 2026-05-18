@@ -1,8 +1,13 @@
 //! Tool call transcript — typed records of every tool call made during execution.
 
-use sha2::{Digest, Sha256};
 #[cfg(not(feature = "std"))]
-use alloc::{borrow::ToOwned, format, string::{String, ToString}, vec::Vec};
+use alloc::{
+    borrow::ToOwned,
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
+use sha2::{Digest, Sha256};
 
 /// Status of a tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +53,9 @@ pub struct Transcript {
 
 impl Transcript {
     pub fn new() -> Self {
-        Transcript { records: Vec::new() }
+        Transcript {
+            records: Vec::new(),
+        }
     }
 
     /// Record a successful tool call.

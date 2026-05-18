@@ -140,12 +140,14 @@ fn json_encode_empty_table_is_object_integration() {
 #[test]
 fn json_encode_object_key_ordering_integration() {
     // Keys should appear in sorted order; mixed int+string keys → object.
-    let out = run_ok(r#"
+    let out = run_ok(
+        r#"
         local t = {}
         t["b"] = 2
         t["a"] = 1
         return json.encode(t)
-    "#);
+    "#,
+    );
     // Keys sorted: "a" < "b".
     assert_eq!(out.return_value, s(r#"{"a":1,"b":2}"#));
 }
@@ -304,7 +306,8 @@ fn json_roundtrip_nested_integration() {
 #[test]
 fn json_roundtrip_preserves_order_integration() {
     // encode → decode → encode should produce identical output.
-    let out = run_ok(r#"
+    let out = run_ok(
+        r#"
         local t = {}
         t["a"] = 1
         t["b"] = 2
@@ -312,7 +315,8 @@ fn json_roundtrip_preserves_order_integration() {
         local first = json.encode(t)
         local second = json.encode(json.decode(first))
         return first == second
-    "#);
+    "#,
+    );
     assert_eq!(out.return_value, LuaValue::Boolean(true));
 }
 
@@ -419,9 +423,15 @@ fn json_decode_charges_gas() {
 #[test]
 fn json_decode_table_memory_charged() {
     // A very tight memory budget should cause decoding a large array to fail.
-    let config = VmConfig { memory_limit_bytes: 200, ..VmConfig::default() };
-    let err = run_with_config(r#"return json.decode("[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]")"#, config)
-        .unwrap_err();
+    let config = VmConfig {
+        memory_limit_bytes: 200,
+        ..VmConfig::default()
+    };
+    let err = run_with_config(
+        r#"return json.decode("[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]")"#,
+        config,
+    )
+    .unwrap_err();
     assert_eq!(err, VmError::MemoryExhausted);
 
     // With an adequate budget it must succeed.

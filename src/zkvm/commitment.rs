@@ -67,9 +67,7 @@ pub fn hash_output(output: &VmOutput) -> [u8; 32] {
     let mut h = Sha256::new();
 
     // 1. Return value
-    h.update(
-        canonical_serialize(&output.return_value).unwrap_or_else(|_| b"null".to_vec()),
-    );
+    h.update(canonical_serialize(&output.return_value).unwrap_or_else(|_| b"null".to_vec()));
 
     // 2. Logs: length-prefixed
     for log in &output.logs {
@@ -188,7 +186,11 @@ mod tests {
     fn compute_public_inputs_tls_hash_nonzero_for_verified() {
         let tape = OracleTape::new();
         let output = make_output(LuaValue::Nil);
-        let attestations = vec![TlsAttestationRecord::p256_verified(vec![vec![1, 2, 3]], "example.com".to_string(), 0)];
+        let attestations = vec![TlsAttestationRecord::p256_verified(
+            vec![vec![1, 2, 3]],
+            "example.com".to_string(),
+            0,
+        )];
         let pi = compute_public_inputs([0u8; 32], &LuaValue::Nil, &tape, &output, &attestations);
         assert_ne!(pi.tls_attestation_hash, [0u8; 32]);
     }

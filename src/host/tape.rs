@@ -9,9 +9,14 @@
 //! same return value) without making any external calls, which makes it
 //! suitable for execution inside a zkVM guest.
 
-use sha2::{Digest, Sha256};
 #[cfg(not(feature = "std"))]
-use alloc::{borrow::ToOwned, format, string::{String, ToString}, vec::Vec};
+use alloc::{
+    borrow::ToOwned,
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
+use sha2::{Digest, Sha256};
 
 use crate::{
     host::{canonicalize::canonical_deserialize, transcript::ToolCallRecord},
@@ -46,7 +51,9 @@ pub struct OracleTape {
 
 impl OracleTape {
     pub fn new() -> Self {
-        OracleTape { entries: Vec::new() }
+        OracleTape {
+            entries: Vec::new(),
+        }
     }
 
     /// Build an `OracleTape` from a slice of `ToolCallRecord`s (e.g. from
@@ -93,7 +100,10 @@ impl OracleTape {
 
     /// Hex-encoded SHA-256 commitment hash (64 lowercase hex chars).
     pub fn commitment_hash_hex(&self) -> String {
-        self.commitment_hash().iter().map(|b| format!("{b:02x}")).collect()
+        self.commitment_hash()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -223,7 +233,10 @@ mod tests {
         let r = err_record(0, "something failed");
         let tape = OracleTape::from_records(&[r]);
         assert_eq!(tape.len(), 1);
-        assert_eq!(tape.entries[0], TapeEntry::Err("something failed".to_owned()));
+        assert_eq!(
+            tape.entries[0],
+            TapeEntry::Err("something failed".to_owned())
+        );
     }
 
     #[test]
@@ -311,10 +324,7 @@ mod tests {
 
     #[test]
     fn tape_host_advances_cursor() {
-        let records = vec![
-            ok_record(0, b"{\"n\":1}"),
-            ok_record(1, b"{\"n\":2}"),
-        ];
+        let records = vec![ok_record(0, b"{\"n\":1}"), ok_record(1, b"{\"n\":2}")];
         let tape = OracleTape::from_records(&records);
         let mut host = TapeHost::new(tape);
         assert_eq!(host.remaining(), 2);
@@ -344,7 +354,9 @@ mod tests {
                 LuaValue::Integer(1),
             )
             .unwrap();
-        let t = host.call_tool("completely_different_tool", &different_args).unwrap();
+        let t = host
+            .call_tool("completely_different_tool", &different_args)
+            .unwrap();
         let k = LuaKey::String(LuaString::from_str("v"));
         assert_eq!(t.get(&k), Some(&LuaValue::Integer(99)));
     }

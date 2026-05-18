@@ -131,7 +131,9 @@ impl LlmClient {
         messages: &[Message],
     ) -> Result<LlmResponse, LlmError> {
         match &self.backend {
-            Backend::Anthropic { api_key } => self.generate_anthropic(api_key, system_prompt, messages),
+            Backend::Anthropic { api_key } => {
+                self.generate_anthropic(api_key, system_prompt, messages)
+            }
             Backend::Ollama { base_url } => self.generate_ollama(base_url, system_prompt, messages),
         }
     }

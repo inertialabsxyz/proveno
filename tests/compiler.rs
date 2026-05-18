@@ -1,4 +1,4 @@
-use luai::compiler::{compile, Constant, Instruction};
+use luai::compiler::{Constant, Instruction, compile};
 use luai::parser::parse;
 
 /// Parse source, compile, and return the top-level function prototype.
@@ -89,7 +89,10 @@ fn test_local_assign_local() {
     let code = top_code("local x = 1\nlocal y = 2\nx = y");
     // x = slot 0, y = slot 1
     // the assign x = y should LoadLocal(1) then StoreLocal(0)
-    let load1 = code.iter().position(|i| *i == Instruction::LoadLocal(1)).unwrap();
+    let load1 = code
+        .iter()
+        .position(|i| *i == Instruction::LoadLocal(1))
+        .unwrap();
     assert_eq!(code[load1 + 1], Instruction::StoreLocal(0));
 }
 
@@ -138,7 +141,10 @@ fn test_if_else() {
 fn test_while_loop() {
     let code = top_code("local i = 0\nwhile i < 10 do\n  i = i + 1\nend");
     // Should have a back-edge Jmp with negative offset.
-    assert!(code.iter().any(|i| matches!(i, Instruction::Jmp(o) if *o < 0)));
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::Jmp(o) if *o < 0))
+    );
     assert!(code.iter().any(|i| matches!(i, Instruction::JmpIfNot(_))));
 }
 
@@ -151,7 +157,10 @@ fn test_numeric_for() {
     let code = top_code("for i = 1, 10 do end");
     // Should contain LoadLocal, Add (for increment), and a back-edge Jmp.
     assert!(code.contains(&Instruction::Add));
-    assert!(code.iter().any(|i| matches!(i, Instruction::Jmp(o) if *o < 0)));
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::Jmp(o) if *o < 0))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -161,21 +170,30 @@ fn test_numeric_for() {
 #[test]
 fn test_generic_for_sorted() {
     let code = top_code("local t = {}\nfor k, v in pairs_sorted(t) do end");
-    assert!(code.iter().any(|i| matches!(i, Instruction::IterInitSorted(_))));
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::IterInitSorted(_)))
+    );
     assert!(code.iter().any(|i| matches!(i, Instruction::IterNext(_))));
 }
 
 #[test]
 fn test_generic_for_array() {
     let code = top_code("local t = {}\nfor i, v in ipairs(t) do end");
-    assert!(code.iter().any(|i| matches!(i, Instruction::IterInitArray(_))));
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::IterInitArray(_)))
+    );
     assert!(code.iter().any(|i| matches!(i, Instruction::IterNext(_))));
 }
 
 #[test]
 fn test_generic_for_pairs_alias() {
     let code = top_code("local t = {}\nfor k, v in pairs(t) do end");
-    assert!(code.iter().any(|i| matches!(i, Instruction::IterInitSorted(_))));
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::IterInitSorted(_)))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +205,10 @@ fn test_break_inside_while() {
     let code = top_code("while true do\n  break\nend");
     // break emits a Jmp(0) which gets patched; just check it's there.
     // The loop has at least 2 Jmps (back-edge and break).
-    let jmps: Vec<_> = code.iter().filter(|i| matches!(i, Instruction::Jmp(_))).collect();
+    let jmps: Vec<_> = code
+        .iter()
+        .filter(|i| matches!(i, Instruction::Jmp(_)))
+        .collect();
     assert!(jmps.len() >= 1);
 }
 
@@ -256,7 +277,12 @@ fn test_function_decl() {
     // function f(a, b) return a + b end
     let prog = compile_src!("function f(a, b) return a + b end");
     // Top-level should have a Closure instruction.
-    assert!(prog.prototypes[0].code.iter().any(|i| matches!(i, Instruction::Closure(_))));
+    assert!(
+        prog.prototypes[0]
+            .code
+            .iter()
+            .any(|i| matches!(i, Instruction::Closure(_)))
+    );
     // There should be a second prototype for the function body.
     assert!(prog.prototypes.len() >= 2);
     let body = &prog.prototypes[1];
@@ -281,7 +307,10 @@ fn test_upvalue_capture() {
     // local x = 1; local function f() return x end
     let prog = compile_src!("local x = 1\nlocal function f() return x end");
     // The inner function should have an upvalue.
-    let inner = prog.prototypes.iter().find(|p| p.param_count == 0 && p.upvalue_count > 0);
+    let inner = prog
+        .prototypes
+        .iter()
+        .find(|p| p.param_count == 0 && p.upvalue_count > 0);
     assert!(inner.is_some(), "expected a prototype with an upvalue");
 }
 
@@ -291,12 +320,15 @@ fn test_upvalue_chain() {
     // local function outer()
     //   local function inner() return x end
     // end
-    let src = "local x = 1\nlocal function outer()\n  local function inner()\n    return x\n  end\nend";
+    let src =
+        "local x = 1\nlocal function outer()\n  local function inner()\n    return x\n  end\nend";
     let prog = compile_src!(src);
     // There should be 3 prototypes total (top, outer, inner).
     assert!(prog.prototypes.len() >= 3);
     // inner should have upvalue count > 0.
-    let inner_count = prog.prototypes.iter()
+    let inner_count = prog
+        .prototypes
+        .iter()
         .filter(|p| p.upvalue_count > 0)
         .count();
     assert!(inner_count >= 1);
@@ -322,7 +354,8 @@ fn test_method_call() {
 fn test_constant_dedup() {
     // "foo" .. "foo" should produce a single constant entry for "foo".
     let consts = top_constants(r#"local s = "foo" .. "foo""#);
-    let foo_count = consts.iter()
+    let foo_count = consts
+        .iter()
         .filter(|c| matches!(c, Constant::String(b) if b == b"foo"))
         .count();
     assert_eq!(foo_count, 1, "constant 'foo' should be deduplicated");
@@ -336,7 +369,9 @@ fn test_constant_dedup() {
 fn test_too_many_locals() {
     use luai::compiler::CompileError;
     // Generate 201 local declarations.
-    let src: String = (0..201).map(|i| format!("local _v{} = {}\n", i, i)).collect();
+    let src: String = (0..201)
+        .map(|i| format!("local _v{} = {}\n", i, i))
+        .collect();
     let block = parse(&src).expect("parse ok");
     let err = compile(&block).expect_err("should fail");
     assert!(matches!(err, CompileError::TooManyLocals { .. }));
@@ -407,7 +442,10 @@ fn test_table_constructor_mixed() {
     let set_tables = code.iter().filter(|i| **i == Instruction::SetTable).count();
     assert_eq!(set_tables, 2);
     // One SetField call for k.
-    let set_fields = code.iter().filter(|i| matches!(i, Instruction::SetField(_))).count();
+    let set_fields = code
+        .iter()
+        .filter(|i| matches!(i, Instruction::SetField(_)))
+        .count();
     assert_eq!(set_fields, 1);
 }
 
@@ -469,17 +507,17 @@ fn test_expr_stmt_not_call() {
 fn test_compile_error_codes() {
     use luai::compiler::CompileError;
     let errors: Vec<CompileError> = vec![
-        CompileError::ToolAsValue        { line: 1 },
-        CompileError::IndirectToolCall   { line: 1 },
+        CompileError::ToolAsValue { line: 1 },
+        CompileError::IndirectToolCall { line: 1 },
         CompileError::VariadicNotAllowed { line: 1 },
-        CompileError::TooManyLocals      { line: 1 },
-        CompileError::TooManyUpvalues    { line: 1 },
-        CompileError::TooManyConstants   { line: 1 },
-        CompileError::TooManyPrototypes  { line: 1 },
-        CompileError::BreakOutsideLoop   { line: 1 },
-        CompileError::ExprStmtNotCall    { line: 1 },
+        CompileError::TooManyLocals { line: 1 },
+        CompileError::TooManyUpvalues { line: 1 },
+        CompileError::TooManyConstants { line: 1 },
+        CompileError::TooManyPrototypes { line: 1 },
+        CompileError::BreakOutsideLoop { line: 1 },
+        CompileError::ExprStmtNotCall { line: 1 },
         CompileError::MultiReturnNotAllowed { line: 1 },
-        CompileError::BytecodeTooLarge   { line: 1 },
+        CompileError::BytecodeTooLarge { line: 1 },
     ];
     for err in &errors {
         assert_eq!(err.code(), "ERR_COMPILE");
@@ -496,7 +534,11 @@ fn test_compile_error_codes() {
 fn test_lines_parallel_to_code() {
     let prog = compile_src!("local x = 42");
     let proto = &prog.prototypes[0];
-    assert_eq!(proto.code.len(), proto.lines.len(), "lines must be parallel to code");
+    assert_eq!(
+        proto.code.len(),
+        proto.lines.len(),
+        "lines must be parallel to code"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -531,7 +573,10 @@ end
 "#;
     let prog = compile_src!(src);
     // f should reference x as an upvalue.
-    let f_proto = prog.prototypes.iter().find(|p| p.param_count == 0 && p.upvalue_count > 0);
+    let f_proto = prog
+        .prototypes
+        .iter()
+        .find(|p| p.param_count == 0 && p.upvalue_count > 0);
     assert!(f_proto.is_some());
     let f = f_proto.unwrap();
     assert!(f.code.iter().any(|i| matches!(i, Instruction::LoadUp(0))));
@@ -545,7 +590,11 @@ end
 fn test_do_block() {
     // do ... end just enters/exits a block; no special bytecode.
     let prog = compile_src!("do\n  local x = 1\nend");
-    assert!(prog.prototypes[0].code.contains(&Instruction::StoreLocal(0)));
+    assert!(
+        prog.prototypes[0]
+            .code
+            .contains(&Instruction::StoreLocal(0))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -557,7 +606,10 @@ fn test_numeric_for_with_step() {
     let code = top_code("for i = 10, 1, -1 do end");
     // Should still contain Add and back-edge Jmp.
     assert!(code.contains(&Instruction::Add));
-    assert!(code.iter().any(|i| matches!(i, Instruction::Jmp(o) if *o < 0)));
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::Jmp(o) if *o < 0))
+    );
 }
 
 // ---------------------------------------------------------------------------

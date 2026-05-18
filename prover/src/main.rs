@@ -36,7 +36,9 @@ fn main() {
         vec!["random".to_string(), "fail".to_string()],
     );
     let program: CompiledProgram = serde_json::from_str(&compiled).unwrap();
-    let result = prover.dry_run(&program.into(), LuaValue::Nil, vec![]).unwrap();
+    let result = prover
+        .dry_run(&program.into(), LuaValue::Nil, vec![])
+        .unwrap();
     let f = File::create(&out_path).unwrap();
     serde_json::to_writer(f, &result).unwrap();
 

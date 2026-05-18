@@ -57,8 +57,17 @@ impl TlsAttestationRecord {
     }
 
     /// Construct a successfully verified P-256 attestation.
-    pub fn p256_verified(cert_chain_der: Vec<Vec<u8>>, hostname: String, cert_not_after: u64) -> Self {
-        TlsAttestationRecord { cert_chain_der, p256_verified: true, hostname, cert_not_after }
+    pub fn p256_verified(
+        cert_chain_der: Vec<Vec<u8>>,
+        hostname: String,
+        cert_not_after: u64,
+    ) -> Self {
+        TlsAttestationRecord {
+            cert_chain_der,
+            p256_verified: true,
+            hostname,
+            cert_not_after,
+        }
     }
 }
 
@@ -92,7 +101,11 @@ pub fn compute_tls_attestation_hash(records: &[TlsAttestationRecord]) -> [u8; 32
         }
     }
 
-    if has_verified { h.finalize().into() } else { [0u8; 32] }
+    if has_verified {
+        h.finalize().into()
+    } else {
+        [0u8; 32]
+    }
 }
 
 #[cfg(test)]
@@ -131,23 +144,40 @@ mod tests {
 
     #[test]
     fn different_chains_give_different_hashes() {
-        let r1 = vec![TlsAttestationRecord::p256_verified(vec![vec![1, 2, 3]], "a.com".to_string(), 0)];
-        let r2 = vec![TlsAttestationRecord::p256_verified(vec![vec![4, 5, 6]], "a.com".to_string(), 0)];
-        assert_ne!(compute_tls_attestation_hash(&r1), compute_tls_attestation_hash(&r2));
+        let r1 = vec![TlsAttestationRecord::p256_verified(
+            vec![vec![1, 2, 3]],
+            "a.com".to_string(),
+            0,
+        )];
+        let r2 = vec![TlsAttestationRecord::p256_verified(
+            vec![vec![4, 5, 6]],
+            "a.com".to_string(),
+            0,
+        )];
+        assert_ne!(
+            compute_tls_attestation_hash(&r1),
+            compute_tls_attestation_hash(&r2)
+        );
     }
 
     #[test]
     fn different_hostnames_give_different_hashes() {
         let r1 = vec![verified("example.com", 9999999999)];
         let r2 = vec![verified("other.com", 9999999999)];
-        assert_ne!(compute_tls_attestation_hash(&r1), compute_tls_attestation_hash(&r2));
+        assert_ne!(
+            compute_tls_attestation_hash(&r1),
+            compute_tls_attestation_hash(&r2)
+        );
     }
 
     #[test]
     fn different_not_after_gives_different_hashes() {
         let r1 = vec![verified("example.com", 1000000000)];
         let r2 = vec![verified("example.com", 2000000000)];
-        assert_ne!(compute_tls_attestation_hash(&r1), compute_tls_attestation_hash(&r2));
+        assert_ne!(
+            compute_tls_attestation_hash(&r1),
+            compute_tls_attestation_hash(&r2)
+        );
     }
 
     #[test]
@@ -173,6 +203,9 @@ mod tests {
             TlsAttestationRecord::p256_verified(vec![vec![0xbb]], "b.com".to_string(), 0),
             TlsAttestationRecord::p256_verified(vec![vec![0xaa]], "a.com".to_string(), 0),
         ];
-        assert_ne!(compute_tls_attestation_hash(&r_ab), compute_tls_attestation_hash(&r_ba));
+        assert_ne!(
+            compute_tls_attestation_hash(&r_ab),
+            compute_tls_attestation_hash(&r_ba)
+        );
     }
 }

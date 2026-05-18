@@ -1,7 +1,17 @@
 #[cfg(feature = "std")]
 use std::{cell::RefCell, rc::Rc};
 #[cfg(not(feature = "std"))]
-use {alloc::{boxed::Box, format, rc::Rc, string::{String, ToString}, vec, vec::Vec}, core::cell::RefCell};
+use {
+    alloc::{
+        boxed::Box,
+        format,
+        rc::Rc,
+        string::{String, ToString},
+        vec,
+        vec::Vec,
+    },
+    core::cell::RefCell,
+};
 
 use crate::{
     compiler::proto::{CompiledProgram, Constant, Instruction, UpvalueDesc},
@@ -246,7 +256,11 @@ impl<H: HostInterface> Vm<H> {
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    let line = program.prototypes[proto_idx].lines.get(pc).copied().unwrap_or(0);
+                    let line = program.prototypes[proto_idx]
+                        .lines
+                        .get(pc)
+                        .copied()
+                        .unwrap_or(0);
                     return Err(VmError::WithLine(line, Box::new(e)));
                 }
             }
@@ -1124,9 +1138,11 @@ impl<H: HostInterface> Vm<H> {
                     other.type_name()
                 )));
             }
-            None => return Err(VmError::RuntimeError(LuaValue::String(
-                LuaString::from_str("table.sort: missing table argument"),
-            ))),
+            None => {
+                return Err(VmError::RuntimeError(LuaValue::String(
+                    LuaString::from_str("table.sort: missing table argument"),
+                )));
+            }
         };
 
         let comp = args.get(1).cloned();
@@ -1376,7 +1392,9 @@ mod tests {
             ))))
         })?;
         let mut vm = Vm::new(config, NoopHost);
-        let output = vm.execute(&program, LuaValue::Nil).map_err(strip_line_info)?;
+        let output = vm
+            .execute(&program, LuaValue::Nil)
+            .map_err(strip_line_info)?;
         Ok(output.return_value)
     }
 

@@ -21,6 +21,11 @@
 //! `AggStarkProof` and the integrity check is supplemented by a real
 //! cryptographic verification of that blob against the public inputs.
 
+// Known stable policy hash for `template_price_feed_v1` (src/policy/profiles.rs):
+//   0xe401364e121c0805290b1f060a6ed9a8dc796f86c17ead7632f01e0c1ec24687
+// This value is deterministic: it is the SHA-256 of the canonical bytes of the
+// policy (allowed domains sorted, methods sorted, all fields serialised in a
+// fixed order).  Regenerate with: cargo run -p luai-verifier --bin policy-hash
 use luai::zkvm::commitment::PublicInputs;
 use sha2::{Digest, Sha256};
 

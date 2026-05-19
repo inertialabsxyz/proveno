@@ -1,4 +1,2 @@
-local function is_random(n)
-    return tool.call("random", {}).result == 42
-end
-return is_random()
+local r = tool.call("http_get", {url = "https://httpbin.org/json"})
+return r.status

@@ -52,12 +52,16 @@ fn main() {
         }
     }
 
-    let host = ProverHost {};
+    let host = ProverHost::new();
     let vm_config = VmConfig::default();
     let prover = Prover::new(
         vm_config,
         host,
-        vec!["random".to_string(), "fail".to_string()],
+        vec![
+            "http_get".to_string(),
+            "random".to_string(),
+            "fail".to_string(),
+        ],
     );
     let program: CompiledProgram = serde_json::from_str(&compiled).unwrap();
 

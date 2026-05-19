@@ -974,6 +974,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "luai-verifier"
+version = "0.1.0"
+dependencies = [
+ "luai",
+ "sha2",
+]
+
+[[package]]
 name = "luai_prover"
 version = "0.1.0"
 dependencies = [

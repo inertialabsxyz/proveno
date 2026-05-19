@@ -30,9 +30,9 @@ All gas measurements are EVM-deterministic and do not change between local and S
 
 | Contract | Address | Deploy tx |
 |---|---|---|
-| `StubOpenVmVerifier` | `0x5FbDB2315678afecb367f032d93F642f64180aa3` | `0x5908...bc8b` |
-| `LuaiVerifier`       | `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512` | `0x340e...b17e` |
-| `LuaiConsumer`       | `0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0` | `0x2d3e...7382` |
+| `StubOpenVmVerifier` | `0x5FbDB2315678afecb367f032d93F642f64180aa3` | `0x2e210aa4682373d9e39dac55051039134675a124f6fbf1e3c8a282e088d511e3` |
+| `LuaiVerifier`       | `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512` | `0x4694805f51b5bdb3a4847ec7f538ca0fac00dbc09b5ce41645a0ac0ca264aa93` |
+| `LuaiConsumer`       | `0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0` | `0x2b03435d50abc4fb92bf9cd3309066a99a9bccf081630b7c9dfff03f6bd5c613` |
 
 > `StubOpenVmVerifier` is an always-pass stub. It replaces the real OpenVM on-chain verifier,
 > which is not yet deployed on any public testnet. All policy-hash enforcement logic is live;
@@ -63,7 +63,7 @@ bundle using `luai-verifier::build_test_proof`.
 
 | Event | Transaction hash |
 |---|---|
-| Valid proof accepted | `0xa1b568e4a5a6895dbd61cf28055a0d3fd2f02e798ff2a62ebfc5f2bd9c1891f5` |
+| Valid proof accepted (cast send) | `0x8f83c98a1c791a395d050ad0623725c9cb642dfc21b23f881da3567391a14fc7` |
 | Wrong policy hash rejected | reverted with `PolicyHashMismatch()` (selector `0xdec0f374`) — no on-chain tx (static `call`) |
 
 The rejection was confirmed via `cast call` which returned:
@@ -171,13 +171,14 @@ POLICY_HASH=0xe401364e121c0805290b1f060a6ed9a8dc796f86c17ead7632f01e0c1ec24687 \
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
   --broadcast
 
-# 5. Submit valid proof (returns true)
-cast call 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 \
+# 5. Submit valid proof as an actual transaction (produces a tx hash)
+cast send 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 \
   "verify(bytes,(bytes32,bytes32,bytes32,bytes32,bytes32,bytes32))" \
   "0x" \
   "(0x5813db973fe71e92a7b82afbf7c8cc60f317d89b4943a7ea7b2eb8a2815f4667,0x74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b,0x076678f5971d42d16aee5df3af83fef83e7599233028005e92a410a0318c46e0,0xf5c27df563263bde8daabe0ee3044a22f45cb08499dd3ae24669b363c3a79c59,0x0000000000000000000000000000000000000000000000000000000000000000,0xe401364e121c0805290b1f060a6ed9a8dc796f86c17ead7632f01e0c1ec24687)" \
-  --rpc-url http://localhost:8545
-# → 0x...01 (true)
+  --rpc-url http://localhost:8545 \
+  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+# → status: 1 (success), gasUsed: 29919
 
 # 6. Submit wrong policy hash (should revert)
 cast call 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 \

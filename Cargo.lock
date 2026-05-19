@@ -952,6 +952,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "luai",
+ "luai-verifier",
  "luai_prover",
  "openvm",
  "serde",

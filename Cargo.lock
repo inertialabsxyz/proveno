@@ -965,6 +965,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "luai",
+ "luai-verifier",
  "luai_prover",
  "reqwest",
  "serde",

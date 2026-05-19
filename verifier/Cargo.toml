@@ -6,3 +6,7 @@ edition = "2024"
 [dependencies]
 luai = { path = "..", features = ["zkvm"] }
 sha2 = { version = "0.10", default-features = false, features = ["oid"] }
+
+[[bin]]
+name = "policy-hash"
+path = "src/bin/policy_hash.rs"

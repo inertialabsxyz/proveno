@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 luai = { path = "..", features = ["serde", "std", "zkvm"] }
 luai_prover = { path = "../prover" }
+luai-verifier = { path = "../verifier" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
@@ -19,3 +20,7 @@ tempfile = "3"
 [[bin]]
 name = "luai-orchestrator"
 path = "src/main.rs"
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"

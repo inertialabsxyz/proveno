@@ -31,13 +31,17 @@ fn main() {
     // match must pass here (inside the proof), not just in the prover host.
     let verified_attestations = reverify_attestations(&dry_run_result.tls_attestations);
 
-    let public_inputs = compute_public_inputs(
+    let mut public_inputs = compute_public_inputs(
         program.program_hash,
         &input_value,
         &dry_run_result.oracle_tape,
         &output,
         &verified_attestations,
     );
+    // The prover commits to the policy hash; the guest copies it and reveals it.
+    // The on-chain LuaiVerifier checks it. The guest does not re-derive it from
+    // a policy document because the policy is not part of the guest's input.
+    public_inputs.policy_hash = dry_run_result.public_inputs.policy_hash;
 
     assert!(public_inputs == dry_run_result.public_inputs);
 

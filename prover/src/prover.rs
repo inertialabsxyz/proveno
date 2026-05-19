@@ -3,11 +3,12 @@
 use luai::{
     compiler::proto::CompiledProgram,
     host::tape::OracleTape,
+    policy::OraclePolicy,
     tls::TlsAttestationRecord,
     types::value::LuaValue,
     vm::engine::{HostInterface, Vm, VmConfig, VmOutput},
     zkvm::{
-        commitment::{PublicInputs, compute_public_inputs},
+        commitment::{PublicInputs, compute_public_inputs, compute_public_inputs_with_policy},
         guest_input::GuestInput,
     },
 };
@@ -77,6 +78,38 @@ impl<H: HostInterface> Prover<H> {
         })
     }
 
+    /// Execute the program under `policy`, record a transcript, and build an oracle tape.
+    ///
+    /// Like `dry_run` but enforces the policy during execution and populates
+    /// `policy_hash` in the returned `PublicInputs`.
+    pub fn dry_run_with_policy(
+        self,
+        program: &CompiledProgram,
+        input: LuaValue,
+        tls_attestations: Vec<TlsAttestationRecord>,
+        policy: &OraclePolicy,
+    ) -> Result<DryRunResult, luai::VmError> {
+        let mut vm = Vm::new_with_policy(self.config.clone(), self.host, policy.clone());
+        let output = vm.execute(program, input.clone())?;
+
+        let oracle_tape = OracleTape::from_records(&output.transcript);
+        let public_inputs = compute_public_inputs_with_policy(
+            program.program_hash,
+            &input,
+            &oracle_tape,
+            &output,
+            &tls_attestations,
+            policy,
+        );
+
+        Ok(DryRunResult {
+            output,
+            oracle_tape,
+            tls_attestations,
+            public_inputs,
+        })
+    }
+
     /// Build a `GuestInput` from a dry-run result (for passing to the zkVM).
     pub fn build_guest_input(
         &self,
@@ -91,5 +124,29 @@ impl<H: HostInterface> Prover<H> {
             self.config.clone(),
             self.tool_names.clone(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::ProverHost;
+    use luai::{compiler, parser, policy::profiles::constrained_http_v1};
+
+    #[test]
+    fn dry_run_with_policy_sets_policy_hash() {
+        let ast = parser::parse("return 42").unwrap();
+        let program = compiler::compile(&ast).unwrap();
+
+        let policy = constrained_http_v1();
+        let expected_hash = policy.policy_hash();
+
+        let prover = Prover::new(VmConfig::default(), ProverHost {}, vec![]);
+        let result = prover
+            .dry_run_with_policy(&program.into(), LuaValue::Nil, vec![], &policy)
+            .expect("dry_run_with_policy failed");
+
+        assert_eq!(result.public_inputs.policy_hash, expected_hash);
+        assert_ne!(result.public_inputs.policy_hash, [0u8; 32]);
     }
 }

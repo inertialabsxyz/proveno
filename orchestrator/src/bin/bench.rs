@@ -9,15 +9,15 @@
 use std::time::Instant;
 
 use luai::{
-    OracleTape, bytecode, compiler, parser,
+    bytecode, compiler, parser,
     policy::profiles::template_price_feed_v1,
     types::{
         table::{LuaKey, LuaTable},
         value::{LuaString, LuaValue},
     },
-    vm::engine::{HostInterface, Vm, VmConfig},
-    zkvm::commitment::compute_public_inputs_with_policy,
+    vm::engine::{HostInterface, VmConfig},
 };
+use luai_prover::prover::Prover;
 use luai_verifier::build_test_proof;
 
 /// Minimal host for the benchmark: supports `http_get` only.
@@ -87,11 +87,10 @@ return r.status
 "#;
 
     let policy = template_price_feed_v1();
-    let policy_hash = policy.policy_hash();
 
     eprintln!("=== luai Phase 3 Benchmark ===");
     eprintln!("Policy: template_price_feed_v1");
-    eprintln!("Policy hash: 0x{}", hex32(&policy_hash));
+    eprintln!("Policy hash: 0x{}", hex32(&policy.policy_hash()));
 
     // Compile
     eprintln!("\n[1/4] Compiling Lua program...");
@@ -99,32 +98,24 @@ return r.status
     let program = compiler::compile(&ast).expect("compile failed");
     bytecode::verify(&program).expect("bytecode verify failed");
 
-    // Execute with live HTTP + policy enforcement
+    // Execute with live HTTP + policy enforcement, compute public inputs
     eprintln!("[2/4] Executing with live HTTP call to httpbin.org...");
     let t0 = Instant::now();
-    let mut vm = Vm::new_with_policy(VmConfig::default(), BenchHost::new(), policy.clone());
-    let output = vm
-        .execute(&program, LuaValue::Nil)
-        .expect("execution failed");
+    let prover = Prover::new(VmConfig::default(), BenchHost::new(), vec![]);
+    let dry_run_result = prover
+        .dry_run_with_policy(&program.into(), LuaValue::Nil, vec![], &policy)
+        .expect("dry run failed");
     let exec_ms = t0.elapsed().as_millis();
     eprintln!(
         "      Done in {}ms — return={:?}, tool_calls={}",
         exec_ms,
-        output.return_value,
-        output.transcript.len()
+        dry_run_result.output.return_value,
+        dry_run_result.output.transcript.len()
     );
 
-    // Build oracle tape and public inputs with policy hash
+    // Public inputs are already computed inside dry_run_with_policy
     eprintln!("[3/4] Computing public inputs...");
-    let oracle_tape = OracleTape::from_records(&output.transcript);
-    let public_inputs = compute_public_inputs_with_policy(
-        program.program_hash,
-        &LuaValue::Nil,
-        &oracle_tape,
-        &output,
-        &[],
-        &policy,
-    );
+    let public_inputs = dry_run_result.public_inputs;
 
     // Build wire-format proof bundle (placeholder inner proof blob)
     eprintln!("[4/4] Building wire-format proof bundle...");

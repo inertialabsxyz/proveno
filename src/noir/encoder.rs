@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 
-use crate::compiler::proto::{CompiledProgram, Instruction};
+use crate::compiler::proto::CompiledProgram;
 
 use super::opcodes::{instruction_to_opcode_id, instruction_to_operand};
 
@@ -11,37 +11,35 @@ pub struct NoirBytecode {
     pub operands: [i64; MAX_BYTECODE],
     pub program_hash: [u8; 32],
     pub instr_count: usize,
+    /// Byte offset of each prototype in the flat bytecode array.
+    /// `prototype_offsets[i]` is the index of prototype `i`'s first instruction.
+    pub prototype_offsets: Vec<usize>,
 }
 
 #[derive(Debug)]
 pub enum EncodeError {
     TooLong { count: usize },
-    CallNotSupported,
 }
 
 pub fn encode_program(program: &CompiledProgram) -> Result<NoirBytecode, EncodeError> {
-    let code = &program.prototypes[0].code;
-
-    for instr in code {
-        match instr {
-            Instruction::Call(_) | Instruction::Closure(_) | Instruction::PCall(_) => {
-                return Err(EncodeError::CallNotSupported);
-            }
-            _ => {}
-        }
-    }
-
-    let count = code.len();
+    // Concatenate all prototypes into a single flat instruction sequence.
+    let count: usize = program.prototypes.iter().map(|p| p.code.len()).sum();
     if count > MAX_BYTECODE {
         return Err(EncodeError::TooLong { count });
     }
 
+    let mut prototype_offsets = Vec::with_capacity(program.prototypes.len());
     let mut opcodes = [0u8; MAX_BYTECODE];
     let mut operands = [0i64; MAX_BYTECODE];
+    let mut slot = 0usize;
 
-    for (i, instr) in code.iter().enumerate() {
-        opcodes[i] = instruction_to_opcode_id(instr);
-        operands[i] = instruction_to_operand(instr);
+    for proto in &program.prototypes {
+        prototype_offsets.push(slot);
+        for instr in &proto.code {
+            opcodes[slot] = instruction_to_opcode_id(instr);
+            operands[slot] = instruction_to_operand(instr);
+            slot += 1;
+        }
     }
 
     // SHA-256 over (opcode_byte || operand_le_8bytes) for all MAX_BYTECODE slots,
@@ -58,6 +56,7 @@ pub fn encode_program(program: &CompiledProgram) -> Result<NoirBytecode, EncodeE
         operands,
         program_hash,
         instr_count: count,
+        prototype_offsets,
     })
 }
 
@@ -111,5 +110,31 @@ mod tests {
         let enc = encode_program(&program).unwrap();
         assert!(enc.instr_count > 0);
         assert!(enc.instr_count <= MAX_BYTECODE);
+    }
+
+    #[test]
+    fn multi_function_encodes_all_prototypes() {
+        let src = "local function add(a, b) return a + b end; return add(1, 2)";
+        let program = compile_lua(src);
+        assert!(
+            program.prototypes.len() >= 2,
+            "expected at least 2 prototypes"
+        );
+        let enc = encode_program(&program).unwrap();
+        let total: usize = program.prototypes.iter().map(|p| p.code.len()).sum();
+        assert_eq!(enc.instr_count, total);
+        assert_eq!(enc.prototype_offsets.len(), program.prototypes.len());
+        assert_eq!(enc.prototype_offsets[0], 0);
+        if program.prototypes.len() > 1 {
+            assert_eq!(enc.prototype_offsets[1], program.prototypes[0].code.len());
+        }
+    }
+
+    #[test]
+    fn call_closure_pcall_encode_without_error() {
+        let src = "local function f() return 1 end; return f()";
+        let program = compile_lua(src);
+        let enc = encode_program(&program).unwrap();
+        assert!(enc.instr_count > 0);
     }
 }

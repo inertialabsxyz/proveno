@@ -252,6 +252,18 @@ impl<H: HostInterface> Vm<H> {
         let mut return_value = LuaValue::Nil;
         let mut trace: Vec<TraceStep> = Vec::new();
 
+        // Compute global base offset for each prototype: prototype_offsets[i] is
+        // the index of prototype i's first instruction in the flattened bytecode.
+        let prototype_offsets: Vec<usize> = {
+            let mut offsets = Vec::with_capacity(program.prototypes.len());
+            let mut off = 0usize;
+            for proto in &program.prototypes {
+                offsets.push(off);
+                off += proto.code.len();
+            }
+            offsets
+        };
+
         loop {
             let proto_idx = self.frames.last().unwrap().proto_idx;
             let pc = self.frames.last().unwrap().pc;
@@ -276,9 +288,10 @@ impl<H: HostInterface> Vm<H> {
             let instr = program.prototypes[proto_idx].code[pc].clone();
             self.frames.last_mut().unwrap().pc += 1;
 
-            // Capture pre-dispatch state for tracing (top-level frame only).
-            let trace_this = self.config.record_trace && self.frames.len() == 1;
+            // Capture pre-dispatch state for tracing (all frames).
+            let trace_this = self.config.record_trace;
             let (trace_pc, trace_opcode, trace_operand, trace_stack_top) = if trace_this {
+                let global_pc = (prototype_offsets[proto_idx] + pc) as u32;
                 let opcode = instruction_to_opcode_id(&instr);
                 let operand = instruction_to_operand(&instr);
                 let stack_top = match self.stack.last() {
@@ -303,15 +316,24 @@ impl<H: HostInterface> Vm<H> {
                     },
                     _ => 0,
                 };
-                (pc as u32, opcode, operand, stack_top)
+                (global_pc, opcode, operand, stack_top)
             } else {
                 (0, 0, 0, 0)
+            };
+
+            // Compute global next_pc after dispatch: offset of the current frame's
+            // prototype plus the post-dispatch local pc.
+            let next_global_pc = |frames: &[CallFrame], offsets: &[usize]| -> u32 {
+                match frames.last() {
+                    Some(f) => (offsets[f.proto_idx] + f.pc) as u32,
+                    None => 0,
+                }
             };
 
             match self.dispatch(program, instr) {
                 Ok(Some(v)) => {
                     if trace_this {
-                        let next_pc = self.frames.last().map(|f| f.pc as u32).unwrap_or(0);
+                        let next_pc = next_global_pc(&self.frames, &prototype_offsets);
                         trace.push(TraceStep {
                             pc: trace_pc,
                             opcode: trace_opcode,
@@ -325,7 +347,7 @@ impl<H: HostInterface> Vm<H> {
                 }
                 Ok(None) => {
                     if trace_this {
-                        let next_pc = self.frames.last().map(|f| f.pc as u32).unwrap_or(0);
+                        let next_pc = next_global_pc(&self.frames, &prototype_offsets);
                         trace.push(TraceStep {
                             pc: trace_pc,
                             opcode: trace_opcode,

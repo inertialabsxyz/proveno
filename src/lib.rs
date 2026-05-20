@@ -5,6 +5,7 @@ extern crate alloc;
 pub mod bytecode;
 pub mod compiler;
 pub mod host;
+pub mod noir;
 pub mod parser;
 #[cfg(feature = "std")]
 pub mod policy;

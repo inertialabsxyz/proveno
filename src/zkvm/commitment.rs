@@ -151,6 +151,7 @@ mod tests {
             gas_used: 0,
             memory_used: 0,
             transcript: vec![],
+            trace: vec![],
         }
     }
 

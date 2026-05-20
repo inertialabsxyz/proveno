@@ -19,6 +19,10 @@ use crate::{
         tool_registry::ToolRegistry,
         transcript::{ToolCallRecord, Transcript},
     },
+    noir::{
+        opcodes::{instruction_to_opcode_id, instruction_to_operand},
+        trace::TraceStep,
+    },
     types::{
         table::{LuaKey, LuaTable, RawsetResult},
         value::{BuiltinId, LuaClosure, LuaError, LuaString, LuaValue},
@@ -42,6 +46,7 @@ pub struct VmConfig {
     pub max_tool_bytes_in: usize,
     pub max_tool_bytes_out: usize,
     pub max_output_bytes: usize,
+    pub record_trace: bool,
 }
 
 impl Default for VmConfig {
@@ -54,6 +59,7 @@ impl Default for VmConfig {
             max_tool_bytes_in: 64 * 1024,
             max_tool_bytes_out: 1024 * 1024,
             max_output_bytes: 256 * 1024,
+            record_trace: false,
         }
     }
 }
@@ -138,6 +144,7 @@ pub struct VmOutput {
     pub gas_used: u64,
     pub memory_used: u64,
     pub transcript: Vec<ToolCallRecord>,
+    pub trace: Vec<TraceStep>,
 }
 
 // ── HostInterface trait ───────────────────────────────────────────────────────
@@ -243,6 +250,7 @@ impl<H: HostInterface> Vm<H> {
         }
 
         let mut return_value = LuaValue::Nil;
+        let mut trace: Vec<TraceStep> = Vec::new();
 
         loop {
             let proto_idx = self.frames.last().unwrap().proto_idx;
@@ -268,12 +276,65 @@ impl<H: HostInterface> Vm<H> {
             let instr = program.prototypes[proto_idx].code[pc].clone();
             self.frames.last_mut().unwrap().pc += 1;
 
+            // Capture pre-dispatch state for tracing (top-level frame only).
+            let trace_this = self.config.record_trace && self.frames.len() == 1;
+            let (trace_pc, trace_opcode, trace_operand, trace_stack_top) = if trace_this {
+                let opcode = instruction_to_opcode_id(&instr);
+                let operand = instruction_to_operand(&instr);
+                let stack_top = match self.stack.last() {
+                    Some(StackSlot::Value(LuaValue::Integer(n))) => *n,
+                    Some(StackSlot::Value(LuaValue::Boolean(b))) => {
+                        if *b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    Some(StackSlot::Shared(cell)) => match &*cell.borrow() {
+                        LuaValue::Integer(n) => *n,
+                        LuaValue::Boolean(b) => {
+                            if *b {
+                                1
+                            } else {
+                                0
+                            }
+                        }
+                        _ => 0,
+                    },
+                    _ => 0,
+                };
+                (pc as u32, opcode, operand, stack_top)
+            } else {
+                (0, 0, 0, 0)
+            };
+
             match self.dispatch(program, instr) {
                 Ok(Some(v)) => {
+                    if trace_this {
+                        let next_pc = self.frames.last().map(|f| f.pc as u32).unwrap_or(0);
+                        trace.push(TraceStep {
+                            pc: trace_pc,
+                            opcode: trace_opcode,
+                            operand: trace_operand,
+                            stack_top: trace_stack_top,
+                            next_pc,
+                        });
+                    }
                     return_value = v;
                     break;
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    if trace_this {
+                        let next_pc = self.frames.last().map(|f| f.pc as u32).unwrap_or(0);
+                        trace.push(TraceStep {
+                            pc: trace_pc,
+                            opcode: trace_opcode,
+                            operand: trace_operand,
+                            stack_top: trace_stack_top,
+                            next_pc,
+                        });
+                    }
+                }
                 Err(e) => {
                     let line = program.prototypes[proto_idx]
                         .lines
@@ -295,6 +356,7 @@ impl<H: HostInterface> Vm<H> {
             gas_used: self.gas.used(),
             memory_used: self.mem.used(),
             transcript: self.transcript.records().to_vec(),
+            trace,
         })
     }
 

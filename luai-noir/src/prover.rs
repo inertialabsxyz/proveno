@@ -18,6 +18,7 @@ pub struct NoirPublicInputs {
     pub program_hash: [u8; 32],
     pub return_value: i64,
     pub num_steps: u32,
+    pub tool_responses_hash: [u8; 32],
 }
 
 #[derive(Debug)]
@@ -128,6 +129,7 @@ impl NoirProver {
                 program_hash: witness.program_hash,
                 return_value: witness.return_value,
                 num_steps: witness.num_steps,
+                tool_responses_hash: witness.tool_responses_hash,
             },
             prove_duration,
         })

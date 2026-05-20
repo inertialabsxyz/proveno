@@ -1,7 +1,11 @@
 global MAX_BYTECODE: u32 = 512;
 global MAX_STEPS: u32 = 16384;
+global MAX_TOOL_CALLS: u32 = 64;
+global MAX_TAPE_ENTRY_BYTES: u32 = 1024;
+// 64 entries * (1 tag + 4 length bytes + 1024 payload bytes) = 65856
 
 use sha256::digest;
+use sha256::sha256_var;
 
 // Decomposes an i64 operand into 8 little-endian bytes using arithmetic right
 // shift. Negative values are handled correctly via two's complement bit masking.
@@ -29,6 +33,11 @@ fn main(
     num_steps: pub u32,
     program_hash: pub [u8; 32],
     return_value: pub i64,
+    tape_entry_tags: [u8; MAX_TOOL_CALLS],
+    tape_entry_lengths: [u32; MAX_TOOL_CALLS],
+    tape_entry_data: [[u8; MAX_TAPE_ENTRY_BYTES]; MAX_TOOL_CALLS],
+    num_tool_calls: u32,
+    tool_responses_hash: pub [u8; 32],
 ) {
     // 1. Verify program hash: SHA-256 over (opcode || operand LE) for all MAX_BYTECODE slots.
     //    Unused slots are padded with opcode=0, operand=0 by the host.
@@ -115,4 +124,54 @@ fn main(
             }
         }
     }
+
+    // 6. Oracle tape verification: rebuild the commitment hash from witness tape entries
+    //    and assert it matches tool_responses_hash.
+    //
+    //    Framing matches OracleTape::commitment_hash():
+    //      for each entry: tag (1 byte) || length (4 bytes LE) || payload
+    //    We pack entries into a flat byte array without inter-entry padding, then
+    //    hash the first byte_cursor bytes using sha256_var.
+    let mut flat: [u8; 65856] = [0; 65856];
+    let mut byte_cursor: u32 = 0;
+    let mut tape_cursor: u32 = 0;
+
+    for i in 0..MAX_STEPS {
+        if (i as u32) < num_steps {
+            if trace_opcodes[i] == 39 {
+                // ToolCall(39): consume next tape entry.
+                let tag = tape_entry_tags[tape_cursor];
+                let len = tape_entry_lengths[tape_cursor];
+                let data = tape_entry_data[tape_cursor];
+
+                // Write tag byte.
+                flat[byte_cursor] = tag;
+                byte_cursor += 1;
+
+                // Write 4-byte little-endian length.
+                flat[byte_cursor] = (len & 0xFF) as u8;
+                flat[byte_cursor + 1] = ((len >> 8) & 0xFF) as u8;
+                flat[byte_cursor + 2] = ((len >> 16) & 0xFF) as u8;
+                flat[byte_cursor + 3] = ((len >> 24) & 0xFF) as u8;
+                byte_cursor += 4;
+
+                // Write payload bytes (only the first `len` bytes of the padded entry).
+                for j in 0..MAX_TAPE_ENTRY_BYTES {
+                    if j < len {
+                        flat[byte_cursor] = data[j];
+                        byte_cursor += 1;
+                    }
+                }
+
+                tape_cursor += 1;
+            }
+        }
+    }
+
+    // Assert num_tool_calls matches the number of ToolCall steps we counted.
+    assert(tape_cursor == num_tool_calls);
+
+    // Hash exactly byte_cursor bytes and compare to the committed tool_responses_hash.
+    let computed_hash = sha256_var(flat, byte_cursor as u64);
+    assert(computed_hash == tool_responses_hash);
 }

@@ -1,0 +1,13 @@
+[package]
+name = "luai-noir"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+nargo_integration = []
+
+[dependencies]
+luai = { path = ".." }
+
+[dev-dependencies]
+luai = { path = ".." }

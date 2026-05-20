@@ -947,6 +947,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "luai-noir"
+version = "0.1.0"
+dependencies = [
+ "luai",
+]
+
+[[package]]
 name = "luai-openvm"
 version = "0.1.0"
 dependencies = [

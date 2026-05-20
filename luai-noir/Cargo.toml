@@ -7,7 +7,7 @@ edition = "2024"
 nargo_integration = []
 
 [dependencies]
-luai = { path = ".." }
+luai = { path = "..", features = ["zkvm"] }
 
 [dev-dependencies]
-luai = { path = ".." }
+luai = { path = "..", features = ["zkvm"] }

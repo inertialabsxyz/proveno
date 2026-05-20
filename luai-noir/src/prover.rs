@@ -14,11 +14,15 @@ pub struct NoirProof {
     pub prove_duration: std::time::Duration,
 }
 
+/// The six-hash public inputs produced by the Noir proof, matching the
+/// `PublicInputs` struct from `src/zkvm/commitment.rs`.
 pub struct NoirPublicInputs {
     pub program_hash: [u8; 32],
-    pub return_value: i64,
-    pub num_steps: u32,
+    pub input_hash: [u8; 32],
     pub tool_responses_hash: [u8; 32],
+    pub output_hash: [u8; 32],
+    pub tls_attestation_hash: [u8; 32],
+    pub policy_hash: [u8; 32],
 }
 
 #[derive(Debug)]
@@ -127,9 +131,11 @@ impl NoirProver {
             proof_bytes,
             public_inputs: NoirPublicInputs {
                 program_hash: witness.program_hash,
-                return_value: witness.return_value,
-                num_steps: witness.num_steps,
+                input_hash: witness.input_hash,
                 tool_responses_hash: witness.tool_responses_hash,
+                output_hash: witness.output_hash,
+                tls_attestation_hash: witness.tls_attestation_hash,
+                policy_hash: witness.policy_hash,
             },
             prove_duration,
         })

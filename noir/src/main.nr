@@ -1,4 +1,4 @@
-global MAX_BYTECODE: u32 = 64;
+global MAX_BYTECODE: u32 = 512;
 global MAX_STEPS: u32 = 16384;
 
 use sha256::digest;
@@ -32,7 +32,7 @@ fn main(
 ) {
     // 1. Verify program hash: SHA-256 over (opcode || operand LE) for all MAX_BYTECODE slots.
     //    Unused slots are padded with opcode=0, operand=0 by the host.
-    let mut hash_input: [u8; 576] = [0; 576]; // MAX_BYTECODE * 9
+    let mut hash_input: [u8; 4608] = [0; 4608]; // MAX_BYTECODE * 9
     for i in 0..MAX_BYTECODE {
         hash_input[i * 9] = bytecode_opcodes[i];
         let op_bytes: [u8; 8] = operand_le_bytes(bytecode_operands[i]);
@@ -57,22 +57,41 @@ fn main(
             // Opcode and operand must match bytecode at this pc.
             assert(opcode == bytecode_opcodes[pc]);
             assert(operand == bytecode_operands[pc]);
-            assert(opcode <= 15);
+            assert(opcode <= 45);
 
-            // Compute expected next_pc.
+            // Compute expected next_pc. Jump target = pc + 1 + operand (i16 signed offset).
             let jmp_target = (pc as i64 + 1 + operand) as u32;
-            let expected_next_pc = if opcode == 12 {
-                // Jmp: always jump
+            let expected_next_pc = if opcode == 33 {
+                // Jmp(33): always jump
                 jmp_target
-            } else if (opcode == 13) & (stack_top == 0) {
-                // JmpIfNot: jump when zero
+            } else if (opcode == 34) & (stack_top != 0) {
+                // JmpIf(34): jump when non-zero
+                jmp_target
+            } else if (opcode == 35) & (stack_top == 0) {
+                // JmpIfNot(35): jump when zero
+                jmp_target
+            } else if (opcode == 29) & (stack_top == 0) {
+                // And(29): short-circuit jump when zero
+                jmp_target
+            } else if (opcode == 30) & (stack_top != 0) {
+                // Or(30): short-circuit jump when non-zero
+                jmp_target
+            } else if (opcode == 43) & (stack_top == 0) {
+                // IterInitSorted(43): jump when empty
+                jmp_target
+            } else if (opcode == 44) & (stack_top == 0) {
+                // IterInitArray(44): jump when empty
+                jmp_target
+            } else if (opcode == 45) & (stack_top == 0) {
+                // IterNext(45): jump when exhausted
                 jmp_target
             } else {
-                pc + 1 // sequential; Ret is unconstrained below
+                pc + 1
             };
 
-            if opcode != 14 {
-                // Ret: next_pc is unconstrained
+            // Ret(37), Call(36), Closure(38), PCall(40): next_pc is unconstrained.
+            let is_unconstrained = (opcode == 37) | (opcode == 36) | (opcode == 38) | (opcode == 40);
+            if !is_unconstrained {
                 assert(next_pc == expected_next_pc);
             }
         }
@@ -86,12 +105,12 @@ fn main(
         }
     }
 
-    // 5. Return value: the stack_top at the Ret step must equal return_value.
+    // 5. Return value: the stack_top at the Ret(37) step must equal return_value.
     //    This closes the trust gap the prover cannot fabricate a trace that
     //    claims a different output than the program actually produced.
     for i in 0..MAX_STEPS {
         if (i as u32) < num_steps {
-            if trace_opcodes[i] == 14 {
+            if trace_opcodes[i] == 37 {
                 assert(trace_stack_tops[i] == return_value);
             }
         }

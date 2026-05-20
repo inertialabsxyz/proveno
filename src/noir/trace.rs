@@ -1,5 +1,4 @@
-// Phase 2 stub — full implementation in noir/2-trace-emission
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TraceStep {
     pub pc: u32,

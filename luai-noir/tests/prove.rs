@@ -60,14 +60,25 @@ mod nargo_tests {
         let (bytecode, output) = run_lua("return 1 + 2");
         let ret = return_i64(&output.return_value);
         let tape = OracleTape::from_records(&output.transcript);
-        let witness = build_witness(&bytecode, &output.trace, ret, &tape).unwrap();
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
         let proof = prover.prove(&witness).expect("prove failed");
         let verified = prover.verify(&proof).expect("verify failed");
         assert!(verified, "proof should verify");
-        assert_eq!(proof.public_inputs.return_value, 3);
+        assert_eq!(proof.public_inputs.program_hash, witness.program_hash);
+        assert_ne!(proof.public_inputs.tool_responses_hash, [0u8; 32]);
     }
 
     #[test]
@@ -75,7 +86,17 @@ mod nargo_tests {
         let (bytecode, output) = run_lua("return 1 + 2");
         let ret = return_i64(&output.return_value);
         let tape = OracleTape::from_records(&output.transcript);
-        let mut witness = build_witness(&bytecode, &output.trace, ret, &tape).unwrap();
+        let mut witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
         witness.return_value = 999; // tamper
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
@@ -99,14 +120,24 @@ mod nargo_tests {
         let ret = return_i64(&output.return_value);
         assert_eq!(ret, 42);
         let tape = OracleTape::from_records(&output.transcript);
-        let witness = build_witness(&bytecode, &output.trace, ret, &tape).unwrap();
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
         let proof = prover.prove(&witness).expect("prove failed");
         let verified = prover.verify(&proof).expect("verify failed");
         assert!(verified, "multi-function proof should verify");
-        assert_eq!(proof.public_inputs.return_value, 42);
+        assert_eq!(proof.public_inputs.program_hash, witness.program_hash);
     }
 
     #[test]
@@ -118,7 +149,17 @@ mod nargo_tests {
         assert_eq!(ret, 1);
         let tape = OracleTape::from_records(&output.transcript);
         assert!(!tape.is_empty(), "tape should have one entry");
-        let witness = build_witness(&bytecode, &output.trace, ret, &tape).unwrap();
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
         assert_eq!(witness.num_tool_calls, 1);
         assert_ne!(
             witness.tool_responses_hash, [0u8; 32],
@@ -139,7 +180,17 @@ mod nargo_tests {
         let (bytecode, output) = run_lua_with_host(src, FixedResponseHost);
         let ret = return_i64(&output.return_value);
         let tape = OracleTape::from_records(&output.transcript);
-        let mut witness = build_witness(&bytecode, &output.trace, ret, &tape).unwrap();
+        let mut witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
         // Flip the first byte of the first tape entry payload.
         witness.tape_entry_data[0][0] ^= 0xFF;
         let prover = NoirProver {
@@ -169,7 +220,17 @@ mod nargo_tests {
         let ret = return_i64(&output.return_value);
         let tape = OracleTape::from_records(&output.transcript);
         assert!(tape.is_empty());
-        let witness = build_witness(&bytecode, &output.trace, ret, &tape).unwrap();
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
         assert_eq!(witness.num_tool_calls, 0);
         assert_eq!(witness.tool_responses_hash, sha256_empty);
         let prover = NoirProver {

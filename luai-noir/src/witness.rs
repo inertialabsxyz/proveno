@@ -3,12 +3,17 @@ use std::path::Path;
 
 use luai::noir::encoder::NoirBytecode;
 use luai::noir::trace::TraceStep;
+use luai::tls::TlsAttestationRecord;
+use luai::types::value::LuaValue;
+use luai::vm::engine::VmOutput;
+use luai::zkvm::commitment::{hash_input, hash_output};
 use luai::{OracleTape, TapeEntry};
 
 pub const MAX_BYTECODE: usize = 512;
 pub const MAX_STEPS: usize = 16384;
 pub const MAX_TOOL_CALLS: usize = 64;
 pub const MAX_TAPE_ENTRY_BYTES: usize = 1024;
+pub const MAX_CERTS: usize = 4;
 
 pub struct NoirWitness {
     pub bytecode_opcodes: [u8; MAX_BYTECODE],
@@ -26,6 +31,17 @@ pub struct NoirWitness {
     pub tape_entry_data: [[u8; MAX_TAPE_ENTRY_BYTES]; MAX_TOOL_CALLS],
     pub num_tool_calls: u32,
     pub tool_responses_hash: [u8; 32],
+    // TLS attestation witnesses (zeroed when no verified certs)
+    pub cert_public_key_x: [[u8; 32]; MAX_CERTS],
+    pub cert_public_key_y: [[u8; 32]; MAX_CERTS],
+    pub cert_signatures: [[u8; 64]; MAX_CERTS],
+    pub cert_msg_hashes: [[u8; 32]; MAX_CERTS],
+    pub num_certs: u32,
+    // Additional public input hashes
+    pub input_hash: [u8; 32],
+    pub output_hash: [u8; 32],
+    pub tls_attestation_hash: [u8; 32],
+    pub policy_hash: [u8; 32],
 }
 
 #[derive(Debug)]
@@ -45,200 +61,208 @@ impl std::fmt::Display for WitnessError {
 
 impl std::error::Error for WitnessError {}
 
+/// Build a `NoirWitness` from all execution components.
+///
+/// Returns a heap-allocated witness to avoid placing ~480 KB of fixed-size
+/// arrays on the test-thread stack (default 2 MB on macOS).
+///
+/// `tls_attestation_hash` is `[0u8; 32]` and `num_certs` is 0 for all inputs;
+/// full TLS circuit witnesses are a future phase.
 pub fn build_witness(
     bytecode: &NoirBytecode,
     trace: &[TraceStep],
     return_value: i64,
     oracle_tape: &OracleTape,
-) -> Result<NoirWitness, WitnessError> {
+    input_value: &LuaValue,
+    output: &VmOutput,
+    _tls_attestations: &[TlsAttestationRecord],
+    policy_hash: [u8; 32],
+) -> Result<Box<NoirWitness>, WitnessError> {
     if trace.len() > MAX_STEPS {
         return Err(WitnessError::TraceTooLong { len: trace.len() });
     }
 
-    let mut trace_pcs = [0u32; MAX_STEPS];
-    let mut trace_opcodes = [0u8; MAX_STEPS];
-    let mut trace_operands = [0i64; MAX_STEPS];
-    let mut trace_stack_tops = [0i64; MAX_STEPS];
-    let mut trace_next_pcs = [0u32; MAX_STEPS];
+    // Allocate zeroed witness on the heap. NoirWitness contains only integer
+    // arrays (u8/u32/i64), for which zero-initialisation is always valid.
+    // Safety: NoirWitness contains only integer arrays (u8/u32/i64); zero is valid for all of them.
+    let mut w: Box<NoirWitness> = unsafe { Box::<NoirWitness>::new_zeroed().assume_init() };
 
+    // Bytecode.
+    w.bytecode_opcodes = bytecode.opcodes;
+    w.bytecode_operands = bytecode.operands;
+
+    // Trace.
+    w.num_steps = trace.len() as u32;
     for (i, step) in trace.iter().enumerate() {
-        trace_pcs[i] = step.pc;
-        trace_opcodes[i] = step.opcode;
-        trace_operands[i] = step.operand;
-        trace_stack_tops[i] = step.stack_top;
-        trace_next_pcs[i] = step.next_pc;
+        w.trace_pcs[i] = step.pc;
+        w.trace_opcodes[i] = step.opcode;
+        w.trace_operands[i] = step.operand;
+        w.trace_stack_tops[i] = step.stack_top;
+        w.trace_next_pcs[i] = step.next_pc;
     }
 
-    let mut tape_entry_tags = [0u8; MAX_TOOL_CALLS];
-    let mut tape_entry_lengths = [0u32; MAX_TOOL_CALLS];
-    let mut tape_entry_data = [[0u8; MAX_TAPE_ENTRY_BYTES]; MAX_TOOL_CALLS];
+    // Scalar fields.
+    w.program_hash = bytecode.program_hash;
+    w.return_value = return_value;
 
+    // Oracle tape.
     for (i, entry) in oracle_tape.entries.iter().enumerate().take(MAX_TOOL_CALLS) {
         match entry {
             TapeEntry::Ok(bytes) => {
-                tape_entry_tags[i] = 0x00;
+                w.tape_entry_tags[i] = 0x00;
                 let len = bytes.len().min(MAX_TAPE_ENTRY_BYTES);
-                tape_entry_lengths[i] = len as u32;
-                tape_entry_data[i][..len].copy_from_slice(&bytes[..len]);
+                w.tape_entry_lengths[i] = len as u32;
+                w.tape_entry_data[i][..len].copy_from_slice(&bytes[..len]);
             }
             TapeEntry::Err(msg) => {
-                tape_entry_tags[i] = 0x01;
+                w.tape_entry_tags[i] = 0x01;
                 let msg_bytes = msg.as_bytes();
                 let len = msg_bytes.len().min(MAX_TAPE_ENTRY_BYTES);
-                tape_entry_lengths[i] = len as u32;
-                tape_entry_data[i][..len].copy_from_slice(&msg_bytes[..len]);
+                w.tape_entry_lengths[i] = len as u32;
+                w.tape_entry_data[i][..len].copy_from_slice(&msg_bytes[..len]);
             }
         }
     }
+    w.num_tool_calls = oracle_tape.entries.len().min(MAX_TOOL_CALLS) as u32;
+    w.tool_responses_hash = oracle_tape.commitment_hash();
 
-    let num_tool_calls = oracle_tape.entries.len().min(MAX_TOOL_CALLS) as u32;
-    let tool_responses_hash = oracle_tape.commitment_hash();
+    // TLS: full P-256 cert witnesses are not yet wired up. The circuit takes
+    // the num_certs == 0 branch and asserts tls_attestation_hash == [0; 32].
+    w.num_certs = 0;
+    w.tls_attestation_hash = [0u8; 32];
 
-    Ok(NoirWitness {
-        bytecode_opcodes: bytecode.opcodes,
-        bytecode_operands: bytecode.operands,
-        trace_pcs,
-        trace_opcodes,
-        trace_operands,
-        trace_stack_tops,
-        trace_next_pcs,
-        num_steps: trace.len() as u32,
-        program_hash: bytecode.program_hash,
-        return_value,
-        tape_entry_tags,
-        tape_entry_lengths,
-        tape_entry_data,
-        num_tool_calls,
-        tool_responses_hash,
-    })
+    // Public input hashes.
+    w.input_hash = hash_input(input_value);
+    w.output_hash = hash_output(output);
+    w.policy_hash = policy_hash;
+
+    Ok(w)
 }
 
 pub fn write_prover_toml(witness: &NoirWitness, path: &Path) -> io::Result<()> {
     let mut out = String::new();
 
-    // Public inputs as top-level scalar keys.
+    // Public inputs as top-level scalar/array keys.
     out.push_str(&format!("num_steps = {}\n", witness.num_steps));
     out.push_str(&format!("return_value = {}\n", witness.return_value));
     out.push_str(&format!(
         "program_hash = [{}]\n",
-        witness
-            .program_hash
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        bytes_toml(&witness.program_hash)
     ));
     out.push_str(&format!(
         "tool_responses_hash = [{}]\n",
-        witness
-            .tool_responses_hash
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        bytes_toml(&witness.tool_responses_hash)
+    ));
+    out.push_str(&format!(
+        "input_hash = [{}]\n",
+        bytes_toml(&witness.input_hash)
+    ));
+    out.push_str(&format!(
+        "output_hash = [{}]\n",
+        bytes_toml(&witness.output_hash)
+    ));
+    out.push_str(&format!(
+        "tls_attestation_hash = [{}]\n",
+        bytes_toml(&witness.tls_attestation_hash)
+    ));
+    out.push_str(&format!(
+        "policy_hash = [{}]\n",
+        bytes_toml(&witness.policy_hash)
     ));
 
     // Private witness arrays.
     out.push_str(&format!(
         "bytecode_opcodes = [{}]\n",
-        witness
-            .bytecode_opcodes
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        bytes_toml(&witness.bytecode_opcodes)
     ));
     out.push_str(&format!(
         "bytecode_operands = [{}]\n",
-        witness
-            .bytecode_operands
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        i64s_toml(&witness.bytecode_operands)
     ));
     out.push_str(&format!(
         "trace_pcs = [{}]\n",
-        witness
-            .trace_pcs
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        u32s_toml(&witness.trace_pcs)
     ));
     out.push_str(&format!(
         "trace_opcodes = [{}]\n",
-        witness
-            .trace_opcodes
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        bytes_toml(&witness.trace_opcodes)
     ));
     out.push_str(&format!(
         "trace_operands = [{}]\n",
-        witness
-            .trace_operands
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        i64s_toml(&witness.trace_operands)
     ));
     out.push_str(&format!(
         "trace_stack_tops = [{}]\n",
-        witness
-            .trace_stack_tops
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        i64s_toml(&witness.trace_stack_tops)
     ));
     out.push_str(&format!(
         "trace_next_pcs = [{}]\n",
-        witness
-            .trace_next_pcs
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        u32s_toml(&witness.trace_next_pcs)
     ));
     out.push_str(&format!("num_tool_calls = {}\n", witness.num_tool_calls));
     out.push_str(&format!(
         "tape_entry_tags = [{}]\n",
-        witness
-            .tape_entry_tags
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        bytes_toml(&witness.tape_entry_tags)
     ));
     out.push_str(&format!(
         "tape_entry_lengths = [{}]\n",
-        witness
-            .tape_entry_lengths
-            .iter()
-            .map(|b| b.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        u32s_toml(&witness.tape_entry_lengths)
+    ));
+    out.push_str(&format!(
+        "tape_entry_data = [{}]\n",
+        rows_toml(witness.tape_entry_data.iter().map(|r| r.as_slice()))
     ));
 
-    // 2D array: array of inline arrays, one per tape entry.
-    let rows: Vec<String> = witness
-        .tape_entry_data
-        .iter()
-        .map(|row| {
-            format!(
-                "[{}]",
-                row.iter()
-                    .map(|b| b.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })
-        .collect();
-    out.push_str(&format!("tape_entry_data = [{}]\n", rows.join(", ")));
+    // TLS witnesses.
+    out.push_str(&format!("num_certs = {}\n", witness.num_certs));
+    out.push_str(&format!(
+        "cert_public_key_x = [{}]\n",
+        rows_toml(witness.cert_public_key_x.iter().map(|r| r.as_slice()))
+    ));
+    out.push_str(&format!(
+        "cert_public_key_y = [{}]\n",
+        rows_toml(witness.cert_public_key_y.iter().map(|r| r.as_slice()))
+    ));
+    out.push_str(&format!(
+        "cert_signatures = [{}]\n",
+        rows_toml(witness.cert_signatures.iter().map(|r| r.as_slice()))
+    ));
+    out.push_str(&format!(
+        "cert_msg_hashes = [{}]\n",
+        rows_toml(witness.cert_msg_hashes.iter().map(|r| r.as_slice()))
+    ));
 
     std::fs::write(path, out)
+}
+
+fn bytes_toml(slice: &[u8]) -> String {
+    slice
+        .iter()
+        .map(|b| b.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn u32s_toml(slice: &[u32]) -> String {
+    slice
+        .iter()
+        .map(|b| b.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn i64s_toml(slice: &[i64]) -> String {
+    slice
+        .iter()
+        .map(|b| b.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn rows_toml<'a>(rows: impl Iterator<Item = &'a [u8]>) -> String {
+    rows.map(|row| format!("[{}]", bytes_toml(row)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -247,9 +271,10 @@ mod tests {
     use luai::compiler::compile;
     use luai::noir::encoder::encode_program;
     use luai::parser::parse;
+    use luai::types::value::LuaValue;
     use luai::{NoopHost, OracleTape, Vm, VmConfig};
 
-    fn run(src: &str) -> (NoirBytecode, Vec<TraceStep>, i64) {
+    fn run(src: &str) -> (NoirBytecode, VmOutput, i64) {
         let program = compile(&parse(src).unwrap()).unwrap();
         let bytecode = encode_program(&program).unwrap();
         let config = VmConfig {
@@ -257,33 +282,46 @@ mod tests {
             ..VmConfig::default()
         };
         let output = Vm::new(config, NoopHost)
-            .execute(&program, luai::types::value::LuaValue::Nil)
+            .execute(&program, LuaValue::Nil)
             .unwrap();
-        let return_val = match output.return_value {
-            luai::types::value::LuaValue::Integer(n) => n,
+        let return_val = match &output.return_value {
+            LuaValue::Integer(n) => *n,
             _ => 0,
         };
-        (bytecode, output.trace, return_val)
+        (bytecode, output, return_val)
     }
 
     #[test]
     fn build_witness_simple() {
-        let (bytecode, trace, ret) = run("return 1 + 2");
-        assert!(!trace.is_empty());
+        let (bytecode, output, ret) = run("return 1 + 2");
+        assert!(!output.trace.is_empty());
         let tape = OracleTape::new();
-        let witness = build_witness(&bytecode, &trace, ret, &tape).unwrap();
-        assert_eq!(witness.num_steps, trace.len() as u32);
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
+        assert_eq!(witness.num_steps, output.trace.len() as u32);
         assert_eq!(witness.return_value, 3);
         assert_eq!(
             witness.bytecode_opcodes[0..bytecode.instr_count],
             bytecode.opcodes[0..bytecode.instr_count]
         );
         assert_eq!(witness.num_tool_calls, 0);
+        assert_eq!(witness.num_certs, 0);
+        assert_eq!(witness.tls_attestation_hash, [0u8; 32]);
+        assert_eq!(witness.policy_hash, [0u8; 32]);
     }
 
     #[test]
     fn trace_too_long_returns_error() {
-        let (bytecode, _, _) = run("return 1");
+        let (bytecode, output, _) = run("return 1");
         let too_long: Vec<TraceStep> = (0..=MAX_STEPS)
             .map(|i| TraceStep {
                 pc: i as u32,
@@ -293,14 +331,36 @@ mod tests {
                 next_pc: i as u32 + 1,
             })
             .collect();
-        assert!(build_witness(&bytecode, &too_long, 0, &OracleTape::new()).is_err());
+        assert!(
+            build_witness(
+                &bytecode,
+                &too_long,
+                0,
+                &OracleTape::new(),
+                &LuaValue::Nil,
+                &output,
+                &[],
+                [0u8; 32]
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn write_prover_toml_roundtrip() {
-        let (bytecode, trace, ret) = run("return 42");
+        let (bytecode, output, ret) = run("return 42");
         let tape = OracleTape::new();
-        let witness = build_witness(&bytecode, &trace, ret, &tape).unwrap();
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
         let dir = std::env::temp_dir();
         let path = dir.join("test_prover.toml");
         write_prover_toml(&witness, &path).unwrap();
@@ -312,13 +372,30 @@ mod tests {
         assert!(contents.contains("trace_pcs = ["));
         assert!(contents.contains("tool_responses_hash = ["));
         assert!(contents.contains("tape_entry_data = ["));
+        assert!(contents.contains("input_hash = ["));
+        assert!(contents.contains("output_hash = ["));
+        assert!(contents.contains("tls_attestation_hash = ["));
+        assert!(contents.contains("policy_hash = ["));
+        assert!(contents.contains("num_certs ="));
+        assert!(contents.contains("cert_public_key_x = ["));
+        assert!(contents.contains("cert_signatures = ["));
     }
 
     #[test]
     fn build_witness_tape_fields_empty() {
-        let (bytecode, trace, ret) = run("return 1");
+        let (bytecode, output, ret) = run("return 1");
         let tape = OracleTape::new();
-        let witness = build_witness(&bytecode, &trace, ret, &tape).unwrap();
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
         assert_eq!(witness.num_tool_calls, 0);
         // SHA-256 of empty input
         let expected_hash: [u8; 32] = [
@@ -327,5 +404,45 @@ mod tests {
             0x78, 0x52, 0xb8, 0x55,
         ];
         assert_eq!(witness.tool_responses_hash, expected_hash);
+    }
+
+    #[test]
+    fn input_hash_and_output_hash_are_nonzero() {
+        let (bytecode, output, ret) = run("return 99");
+        let tape = OracleTape::new();
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Integer(7),
+            &output,
+            &[],
+            [0u8; 32],
+        )
+        .unwrap();
+        // input_hash = SHA-256("7") which is non-zero
+        assert_ne!(witness.input_hash, [0u8; 32]);
+        // output_hash is SHA-256 over return value bytes + (empty logs/transcript)
+        assert_ne!(witness.output_hash, [0u8; 32]);
+    }
+
+    #[test]
+    fn policy_hash_propagated() {
+        let (bytecode, output, ret) = run("return 1");
+        let tape = OracleTape::new();
+        let policy = [0xABu8; 32];
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            &[],
+            policy,
+        )
+        .unwrap();
+        assert_eq!(witness.policy_hash, policy);
     }
 }

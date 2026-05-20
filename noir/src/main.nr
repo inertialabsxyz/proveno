@@ -3,6 +3,7 @@ global MAX_STEPS: u32 = 16384;
 global MAX_TOOL_CALLS: u32 = 64;
 global MAX_TAPE_ENTRY_BYTES: u32 = 1024;
 // 64 entries * (1 tag + 4 length bytes + 1024 payload bytes) = 65856
+global MAX_CERTS: u32 = 4;
 
 use sha256::digest;
 use sha256::sha256_var;
@@ -38,6 +39,15 @@ fn main(
     tape_entry_data: [[u8; MAX_TAPE_ENTRY_BYTES]; MAX_TOOL_CALLS],
     num_tool_calls: u32,
     tool_responses_hash: pub [u8; 32],
+    input_hash: pub [u8; 32],
+    output_hash: pub [u8; 32],
+    tls_attestation_hash: pub [u8; 32],
+    policy_hash: pub [u8; 32],
+    cert_public_key_x: [[u8; 32]; MAX_CERTS],
+    cert_public_key_y: [[u8; 32]; MAX_CERTS],
+    cert_signatures: [[u8; 64]; MAX_CERTS],
+    cert_msg_hashes: [[u8; 32]; MAX_CERTS],
+    num_certs: u32,
 ) {
     // 1. Verify program hash: SHA-256 over (opcode || operand LE) for all MAX_BYTECODE slots.
     //    Unused slots are padded with opcode=0, operand=0 by the host.
@@ -174,4 +184,35 @@ fn main(
     // Hash exactly byte_cursor bytes and compare to the committed tool_responses_hash.
     let computed_hash = sha256_var(flat, byte_cursor as u64);
     assert(computed_hash == tool_responses_hash);
+
+    // 7. TLS attestation verification.
+    //    For each cert i < num_certs: verify P-256 ECDSA signature.
+    //    Accumulate a SHA-256 over the cert public keys (x || y per cert) in order,
+    //    then assert the result equals tls_attestation_hash.
+    //    When num_certs == 0, assert tls_attestation_hash is the zero array.
+    //
+    //    MAX_CERTS * 64 = 256 bytes
+    let mut tls_flat: [u8; 256] = [0; 256];
+    for i in 0..MAX_CERTS {
+        if (i as u32) < num_certs {
+            assert(std::ecdsa_secp256r1::verify_signature(
+                cert_public_key_x[i],
+                cert_public_key_y[i],
+                cert_signatures[i],
+                cert_msg_hashes[i],
+            ));
+            for j in 0..32 {
+                tls_flat[i * 64 + j] = cert_public_key_x[i][j];
+                tls_flat[i * 64 + 32 + j] = cert_public_key_y[i][j];
+            }
+        }
+    }
+    if num_certs == 0 {
+        for j in 0..32 {
+            assert(tls_attestation_hash[j] == 0);
+        }
+    } else {
+        let computed_tls_hash = sha256_var(tls_flat, (num_certs * 64) as u64);
+        assert(computed_tls_hash == tls_attestation_hash);
+    }
 }

@@ -2,7 +2,7 @@ use luai::types::value::LuaValue;
 use luai::{
     bytecode::verify,
     compiler::compile,
-    noir::opcodes::{JMP_IF_NOT, RET},
+    noir::opcodes::{CALL, JMP_IF_NOT, RET},
     parser::parse,
     vm::engine::{NoopHost, Vm, VmConfig},
 };
@@ -117,4 +117,46 @@ fn trace_stack_top_coerces_bool_to_int() {
 
     // Just before Ret, the stack top is `true` → coerced to 1.
     assert_eq!(ret_step.stack_top, 1);
+}
+
+#[test]
+fn trace_covers_all_call_frames() {
+    // A program with an inner function call: the trace must include instructions
+    // from both the outer frame and the callee frame (multi-function continuity).
+    let program = compile_program("local function add(a, b) return a + b end; return add(10, 32)");
+
+    let mut vm = make_vm(true);
+    let output = vm.execute(&program, LuaValue::Nil).unwrap();
+
+    // The trace must contain at least one Call instruction (from the outer frame)
+    // and the inner function's Ret.
+    let call_count = output.trace.iter().filter(|s| s.opcode == CALL).count();
+    let ret_count = output.trace.iter().filter(|s| s.opcode == RET).count();
+
+    assert!(
+        call_count >= 1,
+        "expected at least one Call in trace, got {call_count}"
+    );
+    assert!(
+        ret_count >= 2,
+        "expected at least two Ret steps (inner + outer), got {ret_count}"
+    );
+
+    // Step continuity holds across frame boundaries: trace_pcs[i+1] == trace_next_pcs[i]
+    // for all non-unconstrained steps, except Call/Ret where next_pc is unconstrained.
+    // Verify that every step's pc appears in the flattened bytecode range.
+    let total_instrs: usize = program.prototypes.iter().map(|p| p.code.len()).sum();
+    for step in &output.trace {
+        assert!(
+            (step.pc as usize) < total_instrs,
+            "trace step pc={} is out of bounds (total_instrs={total_instrs})",
+            step.pc
+        );
+    }
+
+    // The final return value should be 42.
+    match output.return_value {
+        LuaValue::Integer(n) => assert_eq!(n, 42),
+        _ => panic!("expected integer return value"),
+    }
 }

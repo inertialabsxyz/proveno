@@ -951,6 +951,8 @@ name = "luai-noir"
 version = "0.1.0"
 dependencies = [
  "luai",
+ "luai_prover",
+ "serde_json",
 ]
 
 [[package]]

@@ -10,7 +10,7 @@ use luai::zkvm::commitment::{hash_input, hash_output};
 use luai::{OracleTape, TapeEntry};
 
 pub const MAX_BYTECODE: usize = 512;
-pub const MAX_STEPS: usize = 16384;
+pub const MAX_STEPS: usize = 2048;
 pub const MAX_TOOL_CALLS: usize = 64;
 pub const MAX_TAPE_ENTRY_BYTES: usize = 1024;
 pub const MAX_CERTS: usize = 4;
@@ -18,6 +18,7 @@ pub const MAX_CERTS: usize = 4;
 pub struct NoirWitness {
     pub bytecode_opcodes: [u8; MAX_BYTECODE],
     pub bytecode_operands: [i64; MAX_BYTECODE],
+    pub instr_count: u32,
     pub trace_pcs: [u32; MAX_STEPS],
     pub trace_opcodes: [u8; MAX_STEPS],
     pub trace_operands: [i64; MAX_STEPS],
@@ -90,6 +91,7 @@ pub fn build_witness(
     // Bytecode.
     w.bytecode_opcodes = bytecode.opcodes;
     w.bytecode_operands = bytecode.operands;
+    w.instr_count = bytecode.instr_count as u32;
 
     // Trace.
     w.num_steps = trace.len() as u32;
@@ -171,6 +173,7 @@ pub fn write_prover_toml(witness: &NoirWitness, path: &Path) -> io::Result<()> {
     ));
 
     // Private witness arrays.
+    out.push_str(&format!("instr_count = {}\n", witness.instr_count));
     out.push_str(&format!(
         "bytecode_opcodes = [{}]\n",
         bytes_toml(&witness.bytecode_opcodes)

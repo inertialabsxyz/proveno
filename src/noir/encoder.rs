@@ -42,10 +42,10 @@ pub fn encode_program(program: &CompiledProgram) -> Result<NoirBytecode, EncodeE
         }
     }
 
-    // SHA-256 over (opcode_byte || operand_le_8bytes) for all MAX_BYTECODE slots,
-    // including zero-padded slots, so the hash commits to the full fixed-length encoding.
+    // SHA-256 over (opcode_byte || operand_le_8bytes) for live instructions only.
+    // Matches the circuit: sha256_var(hash_input, instr_count * 9).
     let mut hasher = Sha256::new();
-    for i in 0..MAX_BYTECODE {
+    for i in 0..count {
         hasher.update([opcodes[i]]);
         hasher.update(operands[i].to_le_bytes());
     }

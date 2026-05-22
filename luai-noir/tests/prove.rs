@@ -1,10 +1,9 @@
-#[cfg(feature = "nargo_integration")]
 mod nargo_tests {
     use luai::compiler::compile;
     use luai::noir::encoder::encode_program;
     use luai::parser::parse;
-    use luai::types::table::LuaTable;
-    use luai::types::value::LuaValue;
+    use luai::types::table::{LuaKey, LuaTable};
+    use luai::types::value::{LuaString, LuaValue};
     use luai::{HostInterface, OracleTape, Vm, VmConfig, VmOutput};
     use luai_noir::prover::NoirProver;
     use luai_noir::witness::build_witness;
@@ -48,9 +47,10 @@ mod nargo_tests {
         fn call_tool(&mut self, _name: &str, _args: &LuaTable) -> Result<LuaTable, String> {
             let mut t = LuaTable::new();
             t.rawset(
-                luai::types::value::LuaValue::from("value"),
+                LuaKey::String(LuaString::from_str("value")),
                 luai::types::value::LuaValue::Integer(42),
-            );
+            )
+            .unwrap();
             Ok(t)
         }
     }

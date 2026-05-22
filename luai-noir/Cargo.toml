@@ -3,11 +3,14 @@ name = "luai-noir"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-nargo_integration = []
-
 [dependencies]
-luai = { path = "..", features = ["zkvm"] }
+luai = { path = "..", features = ["zkvm", "serde"] }
+luai_prover = { path = "../prover" }
+serde_json = "1"
 
 [dev-dependencies]
 luai = { path = "..", features = ["zkvm"] }
+
+[[bin]]
+name = "luai-noir-witness"
+path = "src/main.rs"

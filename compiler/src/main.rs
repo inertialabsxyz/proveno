@@ -1,22 +1,19 @@
 use std::{
     env,
     fs::{self, File},
-    io::{self, Read},
 };
 
 use luai::{bytecode, compiler, parser};
 
 fn main() {
-    let source = if let Some(path) = env::args().nth(1) {
-        fs::read_to_string(&path).unwrap_or_else(|e| {
-            eprintln!("error reading {path}: {e}");
-            std::process::exit(1);
-        })
-    } else {
-        let mut buf = String::new();
-        io::stdin().read_to_string(&mut buf).unwrap();
-        buf
-    };
+    let path = env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("usage: luai-compiler <source.lua> [output.json]");
+        std::process::exit(1);
+    });
+    let source = fs::read_to_string(&path).unwrap_or_else(|e| {
+        eprintln!("error reading {path}: {e}");
+        std::process::exit(1);
+    });
 
     let out_path = match env::args().nth(2) {
         Some(p) => p,

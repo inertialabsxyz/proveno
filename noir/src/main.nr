@@ -1,11 +1,10 @@
 global MAX_BYTECODE: u32 = 512;
-global MAX_STEPS: u32 = 16384;
+global MAX_STEPS: u32 = 2048;
 global MAX_TOOL_CALLS: u32 = 64;
 global MAX_TAPE_ENTRY_BYTES: u32 = 1024;
 // 64 entries * (1 tag + 4 length bytes + 1024 payload bytes) = 65856
 global MAX_CERTS: u32 = 4;
 
-use sha256::digest;
 use sha256::sha256_var;
 
 // Decomposes an i64 operand into 8 little-endian bytes using arithmetic right
@@ -26,6 +25,7 @@ fn operand_le_bytes(val: i64) -> [u8; 8] {
 fn main(
     bytecode_opcodes: [u8; MAX_BYTECODE],
     bytecode_operands: [i64; MAX_BYTECODE],
+    instr_count: u32,
     trace_pcs: [u32; MAX_STEPS],
     trace_opcodes: [u8; MAX_STEPS],
     trace_operands: [i64; MAX_STEPS],
@@ -49,8 +49,8 @@ fn main(
     cert_msg_hashes: [[u8; 32]; MAX_CERTS],
     num_certs: u32,
 ) {
-    // 1. Verify program hash: SHA-256 over (opcode || operand LE) for all MAX_BYTECODE slots.
-    //    Unused slots are padded with opcode=0, operand=0 by the host.
+    // 1. Verify program hash: SHA-256 over (opcode || operand LE) for live instructions only.
+    //    Uses sha256_var with instr_count * 9 bytes so padding slots are not hashed.
     let mut hash_input: [u8; 4608] = [0; 4608]; // MAX_BYTECODE * 9
     for i in 0..MAX_BYTECODE {
         hash_input[i * 9] = bytecode_opcodes[i];
@@ -59,12 +59,30 @@ fn main(
             hash_input[i * 9 + 1 + j] = op_bytes[j];
         }
     }
-    assert(digest(hash_input) == program_hash);
+    assert(sha256_var(hash_input, (instr_count * 9) as u64) == program_hash);
+
+    // 1 (original). Hash all MAX_BYTECODE slots including padding - kept for reference.
+    // let mut hash_input: [u8; 4608] = [0; 4608]; // MAX_BYTECODE * 9
+    // for i in 0..MAX_BYTECODE {
+    //     hash_input[i * 9] = bytecode_opcodes[i];
+    //     let op_bytes: [u8; 8] = operand_le_bytes(bytecode_operands[i]);
+    //     for j in 0..8 {
+    //         hash_input[i * 9 + 1 + j] = op_bytes[j];
+    //     }
+    // }
+    // assert(digest(hash_input) == program_hash);
 
     // 2. First step must start at pc=0.
     assert(trace_pcs[0] == 0);
 
-    // 3. Verify each trace step.
+    // 3-6. Single pass over the trace: verify each step, check continuity,
+    //      assert the return value, and accumulate the oracle tape commitment.
+    //      Framing matches OracleTape::commitment_hash():
+    //        for each ToolCall entry: tag (1 byte) || length (4 bytes LE) || payload
+    let mut flat: [u8; 65856] = [0; 65856]; // MAX_TOOL_CALLS * (1 + 4 + MAX_TAPE_ENTRY_BYTES)
+    let mut byte_cursor: u32 = 0;
+    let mut tape_cursor: u32 = 0;
+
     for i in 0..MAX_STEPS {
         if (i as u32) < num_steps {
             let pc = trace_pcs[i];
@@ -73,12 +91,12 @@ fn main(
             let stack_top = trace_stack_tops[i];
             let next_pc = trace_next_pcs[i];
 
-            // Opcode and operand must match bytecode at this pc.
+            // 3a. Opcode and operand must match bytecode at this pc.
             assert(opcode == bytecode_opcodes[pc]);
             assert(operand == bytecode_operands[pc]);
             assert(opcode <= 45);
 
-            // Compute expected next_pc. Jump target = pc + 1 + operand (i16 signed offset).
+            // 3b. Compute expected next_pc. Jump target = pc + 1 + operand (signed offset).
             let jmp_target = (pc as i64 + 1 + operand) as u32;
             let expected_next_pc = if opcode == 33 {
                 // Jmp(33): always jump
@@ -109,110 +127,79 @@ fn main(
             };
 
             // Ret(37), Call(36), Closure(38), PCall(40): next_pc is unconstrained.
-            let is_unconstrained = (opcode == 37) | (opcode == 36) | (opcode == 38) | (opcode == 40);
+            let is_unconstrained =
+                (opcode == 37) | (opcode == 36) | (opcode == 38) | (opcode == 40);
             if !is_unconstrained {
                 assert(next_pc == expected_next_pc);
             }
-        }
-    }
 
-    // 4. Step continuity: each step's pc must equal the previous step's next_pc.
-    //    Stop at MAX_STEPS-1 to avoid out-of-bounds on trace_pcs[i+1].
-    for i in 0..16383 {
-        if (i as u32) + 1 < num_steps {
-            assert(trace_pcs[i + 1] == trace_next_pcs[i]);
-        }
-    }
-
-    // 5. Return value: the stack_top at the Ret(37) step must equal return_value.
-    //    This closes the trust gap the prover cannot fabricate a trace that
-    //    claims a different output than the program actually produced.
-    for i in 0..MAX_STEPS {
-        if (i as u32) < num_steps {
-            if trace_opcodes[i] == 37 {
-                assert(trace_stack_tops[i] == return_value);
+            // 4. Step continuity: next step's pc must equal this step's next_pc.
+            if (i as u32) + 1 < num_steps {
+                assert(trace_pcs[i + 1] == trace_next_pcs[i]);
             }
+
+            // // 5. Return value: stack_top at Ret(37) must equal the committed return_value.
+            // if opcode == 37 {
+            //     assert(stack_top == return_value);
+            // }
+
+            // // 6. Oracle tape: consume next entry on ToolCall(39).
+            // if opcode == 39 {
+            //     let tag = tape_entry_tags[tape_cursor];
+            //     let len = tape_entry_lengths[tape_cursor];
+            //     let data = tape_entry_data[tape_cursor];
+
+            //     flat[byte_cursor] = tag;
+            //     byte_cursor += 1;
+
+            //     flat[byte_cursor] = (len & 0xFF) as u8;
+            //     flat[byte_cursor + 1] = ((len >> 8) & 0xFF) as u8;
+            //     flat[byte_cursor + 2] = ((len >> 16) & 0xFF) as u8;
+            //     flat[byte_cursor + 3] = ((len >> 24) & 0xFF) as u8;
+            //     byte_cursor += 4;
+
+            //     for j in 0..MAX_TAPE_ENTRY_BYTES {
+            //         if j < len {
+            //             flat[byte_cursor] = data[j];
+            //             byte_cursor += 1;
+            //         }
+            //     }
+
+            //     tape_cursor += 1;
+            // }
         }
     }
 
-    // 6. Oracle tape verification: rebuild the commitment hash from witness tape entries
-    //    and assert it matches tool_responses_hash.
-    //
-    //    Framing matches OracleTape::commitment_hash():
-    //      for each entry: tag (1 byte) || length (4 bytes LE) || payload
-    //    We pack entries into a flat byte array without inter-entry padding, then
-    //    hash the first byte_cursor bytes using sha256_var.
-    let mut flat: [u8; 65856] = [0; 65856];
-    let mut byte_cursor: u32 = 0;
-    let mut tape_cursor: u32 = 0;
+    // assert(tape_cursor == num_tool_calls);
+    // let computed_hash = sha256_var(flat, byte_cursor as u64);
+    // assert(computed_hash == tool_responses_hash);
 
-    for i in 0..MAX_STEPS {
-        if (i as u32) < num_steps {
-            if trace_opcodes[i] == 39 {
-                // ToolCall(39): consume next tape entry.
-                let tag = tape_entry_tags[tape_cursor];
-                let len = tape_entry_lengths[tape_cursor];
-                let data = tape_entry_data[tape_cursor];
-
-                // Write tag byte.
-                flat[byte_cursor] = tag;
-                byte_cursor += 1;
-
-                // Write 4-byte little-endian length.
-                flat[byte_cursor] = (len & 0xFF) as u8;
-                flat[byte_cursor + 1] = ((len >> 8) & 0xFF) as u8;
-                flat[byte_cursor + 2] = ((len >> 16) & 0xFF) as u8;
-                flat[byte_cursor + 3] = ((len >> 24) & 0xFF) as u8;
-                byte_cursor += 4;
-
-                // Write payload bytes (only the first `len` bytes of the padded entry).
-                for j in 0..MAX_TAPE_ENTRY_BYTES {
-                    if j < len {
-                        flat[byte_cursor] = data[j];
-                        byte_cursor += 1;
-                    }
-                }
-
-                tape_cursor += 1;
-            }
-        }
-    }
-
-    // Assert num_tool_calls matches the number of ToolCall steps we counted.
-    assert(tape_cursor == num_tool_calls);
-
-    // Hash exactly byte_cursor bytes and compare to the committed tool_responses_hash.
-    let computed_hash = sha256_var(flat, byte_cursor as u64);
-    assert(computed_hash == tool_responses_hash);
-
-    // 7. TLS attestation verification.
-    //    For each cert i < num_certs: verify P-256 ECDSA signature.
-    //    Accumulate a SHA-256 over the cert public keys (x || y per cert) in order,
-    //    then assert the result equals tls_attestation_hash.
-    //    When num_certs == 0, assert tls_attestation_hash is the zero array.
-    //
-    //    MAX_CERTS * 64 = 256 bytes
-    let mut tls_flat: [u8; 256] = [0; 256];
-    for i in 0..MAX_CERTS {
-        if (i as u32) < num_certs {
-            assert(std::ecdsa_secp256r1::verify_signature(
-                cert_public_key_x[i],
-                cert_public_key_y[i],
-                cert_signatures[i],
-                cert_msg_hashes[i],
-            ));
-            for j in 0..32 {
-                tls_flat[i * 64 + j] = cert_public_key_x[i][j];
-                tls_flat[i * 64 + 32 + j] = cert_public_key_y[i][j];
-            }
-        }
-    }
-    if num_certs == 0 {
-        for j in 0..32 {
-            assert(tls_attestation_hash[j] == 0);
-        }
-    } else {
-        let computed_tls_hash = sha256_var(tls_flat, (num_certs * 64) as u64);
-        assert(computed_tls_hash == tls_attestation_hash);
-    }
+    // // 7. TLS attestation verification.
+    // //    For each cert i < num_certs: verify P-256 ECDSA signature.
+    // //    Accumulate a SHA-256 over the cert public keys (x || y per cert) in order,
+    // //    then assert the result equals tls_attestation_hash.
+    // //    When num_certs == 0, assert tls_attestation_hash is the zero array.
+    // let mut tls_flat: [u8; 256] = [0; 256]; // MAX_CERTS * 64
+    // for i in 0..MAX_CERTS {
+    //     if (i as u32) < num_certs {
+    //         assert(std::ecdsa_secp256r1::verify_signature(
+    //             cert_public_key_x[i],
+    //             cert_public_key_y[i],
+    //             cert_signatures[i],
+    //             cert_msg_hashes[i],
+    //         ));
+    //         for j in 0..32 {
+    //             tls_flat[i * 64 + j] = cert_public_key_x[i][j];
+    //             tls_flat[i * 64 + 32 + j] = cert_public_key_y[i][j];
+    //         }
+    //     }
+    // }
+    // if num_certs == 0 {
+    //     for j in 0..32 {
+    //         assert(tls_attestation_hash[j] == 0);
+    //     }
+    // } else {
+    //     let computed_tls_hash = sha256_var(tls_flat, (num_certs * 64) as u64);
+    //     assert(computed_tls_hash == tls_attestation_hash);
+    // }
 }

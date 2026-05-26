@@ -216,9 +216,7 @@ pub fn write_prover_toml(witness: &NoirWitness, path: &Path) -> io::Result<()> {
         rows_toml(witness.tape_entry_data.iter().map(|r| r.as_slice()))
     ));
 
-    // TLS witnesses. `num_certs` is intentionally not emitted: the circuit's
-    // `main` does not currently take a cert-count parameter, so writing one
-    // would cause nargo to reject the Prover.toml as an unexpected argument.
+    out.push_str(&format!("num_certs = {}\n", witness.num_certs));
     out.push_str(&format!(
         "cert_public_key_x = [{}]\n",
         rows_toml(witness.cert_public_key_x.iter().map(|r| r.as_slice()))
@@ -380,7 +378,7 @@ mod tests {
         assert!(contents.contains("output_hash = ["));
         assert!(contents.contains("tls_attestation_hash = ["));
         assert!(contents.contains("policy_hash = ["));
-        assert!(!contents.contains("num_certs ="));
+        assert!(contents.contains("num_certs ="));
         assert!(contents.contains("cert_public_key_x = ["));
         assert!(contents.contains("cert_signatures = ["));
     }

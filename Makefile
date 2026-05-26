@@ -1,4 +1,4 @@
-.PHONY: check lint test fix build dev act help
+.PHONY: check lint test test-prove fix build dev act help
 
 help:
 	@echo "Usage: make <target>"
@@ -9,6 +9,7 @@ help:
 	@echo "  test           all tests: unit + integration"
 	@echo "  test-unit      unit tests only (cargo test --lib)"
 	@echo "  test-int       integration tests only (cargo test --tests)"
+	@echo "  test-prove     Noir nargo+bb prove/verify pipeline (slow; pre-PR gate)"
 	@echo "  fix            auto-format + apply safe clippy fixes"
 	@echo "  build          cargo build"
 
@@ -31,6 +32,14 @@ test-unit:
 # Integration tests only
 test-integration:
 	cargo test --tests
+
+# Noir prove/verify pipeline (nargo execute + bb write_vk/prove/verify).
+# Slow (~30 s); not part of `make test`. Required pre-PR gate when touching
+# the Noir circuit, witness writer, oracle tape, or related encoders.
+# Prints prove/verify wall-time per test so regressions are visible.
+# Requires `nargo` and `bb` on PATH.
+test-prove:
+	cargo test -p luai-noir --test prove -- --nocapture
 
 # Auto-fix formatting and apply safe clippy suggestions
 fix:

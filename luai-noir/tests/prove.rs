@@ -5,8 +5,8 @@ mod nargo_tests {
     use luai::types::table::{LuaKey, LuaTable};
     use luai::types::value::{LuaString, LuaValue};
     use luai::{HostInterface, OracleTape, Vm, VmConfig, VmOutput};
-    use luai_noir::prover::NoirProver;
-    use luai_noir::witness::build_witness;
+    use luai_noir::prover::{NoirProof, NoirProver, ProveError};
+    use luai_noir::witness::{NoirWitness, build_witness};
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::Instant;
@@ -49,6 +49,33 @@ mod nargo_tests {
             LuaValue::Integer(n) => *n,
             _ => 0,
         }
+    }
+
+    /// Run `prover.prove(witness)` and print the wall-time as
+    /// `<label>: prove=X.XXs`. Used as a smoke-level regression signal for
+    /// circuit-size / prove-time changes; run with `--nocapture` to see it.
+    fn timed_prove(
+        label: &str,
+        prover: &NoirProver,
+        witness: &NoirWitness,
+    ) -> Result<NoirProof, ProveError> {
+        let start = Instant::now();
+        let result = prover.prove(witness);
+        eprintln!("{label}: prove={:.2}s", start.elapsed().as_secs_f64());
+        result
+    }
+
+    /// Run `prover.verify(proof)` and print the wall-time as
+    /// `<label>: verify=X.XXs`.
+    fn timed_verify(
+        label: &str,
+        prover: &NoirProver,
+        proof: &NoirProof,
+    ) -> Result<bool, ProveError> {
+        let start = Instant::now();
+        let result = prover.verify(proof);
+        eprintln!("{label}: verify={:.2}s", start.elapsed().as_secs_f64());
+        result
     }
 
     /// A host that returns a fixed table `{value = 42}` for any tool call.
@@ -95,17 +122,10 @@ mod nargo_tests {
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
-        let prove_start = Instant::now();
-        let proof = prover.prove(&witness).expect("prove failed");
-        let prove_elapsed = prove_start.elapsed();
-        let verify_start = Instant::now();
-        let verified = prover.verify(&proof).expect("verify failed");
-        let verify_elapsed = verify_start.elapsed();
-        eprintln!(
-            "end_to_end_prove_and_verify: prove={:.2}s verify={:.2}s",
-            prove_elapsed.as_secs_f64(),
-            verify_elapsed.as_secs_f64()
-        );
+        let proof =
+            timed_prove("end_to_end_prove_and_verify", &prover, &witness).expect("prove failed");
+        let verified =
+            timed_verify("end_to_end_prove_and_verify", &prover, &proof).expect("verify failed");
         assert!(verified, "proof should verify");
         assert_eq!(proof.public_inputs.program_hash, witness.program_hash);
         assert_ne!(proof.public_inputs.tool_responses_hash, [0u8; 32]);
@@ -132,10 +152,11 @@ mod nargo_tests {
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
-        let result = prover.prove(&witness);
+        let result = timed_prove("tampered_return_value_fails_verify", &prover, &witness);
         match result {
             Ok(proof) => {
-                let verified = prover.verify(&proof).unwrap_or(false);
+                let verified = timed_verify("tampered_return_value_fails_verify", &prover, &proof)
+                    .unwrap_or(false);
                 assert!(!verified, "tampered proof should not verify");
             }
             Err(_) => {
@@ -166,8 +187,10 @@ mod nargo_tests {
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
-        let proof = prover.prove(&witness).expect("prove failed");
-        let verified = prover.verify(&proof).expect("verify failed");
+        let proof = timed_prove("multi_function_proves_correctly", &prover, &witness)
+            .expect("prove failed");
+        let verified = timed_verify("multi_function_proves_correctly", &prover, &proof)
+            .expect("verify failed");
         assert!(verified, "multi-function proof should verify");
         assert_eq!(proof.public_inputs.program_hash, witness.program_hash);
     }
@@ -201,8 +224,9 @@ mod nargo_tests {
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
-        let proof = prover.prove(&witness).expect("prove failed");
-        let verified = prover.verify(&proof).expect("verify failed");
+        let proof = timed_prove("prove_with_tool_calls", &prover, &witness).expect("prove failed");
+        let verified =
+            timed_verify("prove_with_tool_calls", &prover, &proof).expect("verify failed");
         assert!(verified, "proof with tool calls should verify");
         assert_ne!(proof.public_inputs.tool_responses_hash, [0u8; 32]);
     }
@@ -230,10 +254,11 @@ mod nargo_tests {
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
-        let result = prover.prove(&witness);
+        let result = timed_prove("tampered_tape_entry_fails_verify", &prover, &witness);
         match result {
             Ok(proof) => {
-                let verified = prover.verify(&proof).unwrap_or(false);
+                let verified = timed_verify("tampered_tape_entry_fails_verify", &prover, &proof)
+                    .unwrap_or(false);
                 assert!(!verified, "tampered tape entry should not verify");
             }
             Err(_) => {
@@ -268,8 +293,10 @@ mod nargo_tests {
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
-        let proof = prover.prove(&witness).expect("prove failed");
-        let verified = prover.verify(&proof).expect("verify failed");
+        let proof =
+            timed_prove("no_tool_calls_zero_hash", &prover, &witness).expect("prove failed");
+        let verified =
+            timed_verify("no_tool_calls_zero_hash", &prover, &proof).expect("verify failed");
         assert!(verified, "no-tool-call proof should verify");
         assert_eq!(proof.public_inputs.tool_responses_hash, empty_hash);
     }

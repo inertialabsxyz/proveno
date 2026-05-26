@@ -61,6 +61,10 @@ struct Cli {
     /// Output directory for proof artifacts (used with --prove)
     #[arg(long, default_value = "proof-output")]
     prove_output: String,
+
+    /// Directory containing the Noir circuit (Nargo.toml). Defaults to ./noir
+    #[arg(long, default_value = "noir")]
+    circuit_dir: String,
 }
 
 fn main() {
@@ -235,12 +239,14 @@ fn main() {
 
         // Success
         let prove_artifacts = if cli.prove {
-            let artifacts = prove::build_proof_artifacts(
+            let circuit_dir = std::path::PathBuf::from(&cli.circuit_dir);
+            let artifacts = prove::build_proof_artifacts_with_noir(
                 &program,
                 &LuaValue::Nil,
                 output.clone(),
                 vec![],
                 &cli.prove_output,
+                &circuit_dir,
             );
             match artifacts {
                 Ok(a) => Some(a),
@@ -330,7 +336,7 @@ fn print_json(result: &pipeline::PipelineResult, prove_artifacts: &Option<prove:
     if let Some(artifacts) = prove_artifacts {
         let pi = &artifacts.public_inputs;
         let hex = |h: &[u8; 32]| -> String { h.iter().map(|b| format!("{b:02x}")).collect() };
-        json["proving"] = serde_json::json!({
+        let mut proving = serde_json::json!({
             "program_hash": hex(&pi.program_hash),
             "input_hash": hex(&pi.input_hash),
             "tool_responses_hash": hex(&pi.tool_responses_hash),
@@ -338,6 +344,25 @@ fn print_json(result: &pipeline::PipelineResult, prove_artifacts: &Option<prove:
             "compiled_path": artifacts.compiled_path.to_string_lossy(),
             "dry_result_path": artifacts.dry_result_path.to_string_lossy(),
         });
+        if let Some(np) = &artifacts.noir_proof {
+            let mut proof_hex = String::with_capacity(2 + np.proof_bytes.len() * 2);
+            proof_hex.push_str("0x");
+            for b in &np.proof_bytes {
+                proof_hex.push_str(&format!("{b:02x}"));
+            }
+            proving["proof_bytes_hex"] = serde_json::Value::String(proof_hex);
+            proving["public_inputs"] = serde_json::Value::Array(
+                np.public_inputs_hex
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            );
+            proving["prove_duration_ms"] =
+                serde_json::Value::Number(serde_json::Number::from(np.prove_duration_ms as u64));
+            proving["verified"] = serde_json::Value::Bool(np.verified);
+        }
+        json["proving"] = proving;
     }
 
     println!("{}", serde_json::to_string_pretty(&json).unwrap());

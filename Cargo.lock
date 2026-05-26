@@ -962,7 +962,6 @@ dependencies = [
  "hex",
  "luai",
  "luai-verifier",
- "luai_prover",
  "openvm",
  "serde",
  "serde_json",

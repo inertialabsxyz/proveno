@@ -29,7 +29,7 @@
 use std::{env, fs, process};
 
 use luai::zkvm::commitment::PublicInputs;
-use luai_prover::prover::DryRunResult;
+use luai::zkvm::dry_run_result::DryRunResult;
 use luai_verifier::build_test_proof;
 
 /// Build the luai wire-format proof bundle from public inputs and raw proof bytes.

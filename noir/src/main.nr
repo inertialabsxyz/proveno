@@ -2,7 +2,7 @@ use poseidon::poseidon2::Poseidon2;
 
 global MAX_BYTECODE: u32 = 512;
 global MAX_STEPS: u32 = 2048;
-global MAX_TOOL_CALLS: u32 = 64;
+global MAX_TOOL_CALLS: u32 = 16;
 global MAX_TAPE_ENTRY_BYTES: u32 = 1024;
 // Per-instruction Poseidon2 input pair: opcode field || operand field.
 global MAX_BYTECODE_FIELDS: u32 = MAX_BYTECODE * 2;

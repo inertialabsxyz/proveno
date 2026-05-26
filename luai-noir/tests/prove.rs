@@ -9,6 +9,7 @@ mod nargo_tests {
     use luai_noir::witness::build_witness;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::time::Instant;
 
     /// Every test in this module shares `noir/Prover.toml` and the `noir/target/`
     /// nargo+bb artifact directory. Serialise so parallel runners don't stomp.
@@ -85,8 +86,17 @@ mod nargo_tests {
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
+        let prove_start = Instant::now();
         let proof = prover.prove(&witness).expect("prove failed");
+        let prove_elapsed = prove_start.elapsed();
+        let verify_start = Instant::now();
         let verified = prover.verify(&proof).expect("verify failed");
+        let verify_elapsed = verify_start.elapsed();
+        eprintln!(
+            "end_to_end_prove_and_verify: prove={:.2}s verify={:.2}s",
+            prove_elapsed.as_secs_f64(),
+            verify_elapsed.as_secs_f64()
+        );
         assert!(verified, "proof should verify");
         assert_eq!(proof.public_inputs.program_hash, witness.program_hash);
         assert_ne!(proof.public_inputs.tool_responses_hash, [0u8; 32]);

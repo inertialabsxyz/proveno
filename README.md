@@ -59,9 +59,47 @@ host/            — HostInterface for tool calls; transcript recording;
 3. Prove         cargo run -p luai-noir -- compiled.json dry_result.json --prove
                  → builds the Noir witness, drives `nargo execute` +
                    `bb prove`/`bb verify` against the trace circuit
+4. Submit        cast send / consumeResult against LuaiConsumer.sol
+                 → on-chain UltraHonk verify via HonkVerifier.sol
+                 → LuaiVerifier enforces policyHash match
+                 → LuaiConsumer asserts keccak256(outputPayload) == outputHash
 ```
 
-Public inputs commit to: program hash, input hash, tool responses hash, output hash.
+Public inputs commit to: program hash, input hash, tool responses hash, output
+hash, TLS attestation hash, policy hash (plus `num_steps` and `return_value`).
+
+### Quick start: prove and verify a Lua program
+
+End-to-end demo against a local anvil chain. Requires `nargo`, `bb`, `forge`,
+`cast`, `anvil`, and `jq` on `PATH`, plus `ANTHROPIC_API_KEY`.
+
+```bash
+# 1. (one terminal) build everything once so the demo doesn't time out on cargo
+cargo build --release -p luai-orchestrator -p luai-noir
+
+# 2. (second terminal) run the demo — spins up a temporary anvil, deploys the
+#    HonkVerifier/LuaiVerifier/LuaiConsumer triple, generates a Noir proof for
+#    a small Lua program, and submits it on chain.
+ANTHROPIC_API_KEY=sk-... bash demo-noir-e2e-local.sh \
+    "return a small JSON object {price=100, sources=1, ts=1700000000}"
+
+# 3. Or against an existing chain:
+ANTHROPIC_API_KEY=sk-... \
+RPC_URL=https://... PRIVATE_KEY=0x... DEPLOY=1 \
+    bash demo-noir-e2e.sh "<task>"
+
+# 4. Or against an existing deployment:
+ANTHROPIC_API_KEY=sk-... \
+RPC_URL=https://... PRIVATE_KEY=0x... \
+LUAI_VERIFIER_ADDR=0x... LUAI_CONSUMER_ADDR=0x... \
+    bash demo-noir-e2e.sh "<task>"
+```
+
+The script prints the proof bytes, the 8-element `bytes32[]` public inputs,
+the on-chain `LuaiVerifier.verify` result, and the consumer state after the
+`consumeResult` call. See the comment header in `demo-noir-e2e.sh` for the
+encoding-bridge caveat between `outputHash` (SHA-256) and the consumer's
+`keccak256(outputPayload)` check.
 
 ## Orchestrator
 

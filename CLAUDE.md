@@ -56,8 +56,9 @@ There is no separate lint command; `cargo test` exercises the full suite includi
 | `luai` (root) | Core library: parser, compiler, bytecode, VM, host |
 | `luai-compiler` | CLI: compiles Lua source → verified bytecode JSON |
 | `luai-prover` | CLI: dry-runs bytecode, produces oracle tape + public inputs |
-| `luai-orchestrator` | LLM-driven agent loop (Claude API + live tool execution) |
+| `luai-orchestrator` | LLM-driven agent loop (Claude API + live tool execution; `--prove` runs the full Noir pipeline) |
 | `luai-noir` | Noir witness writer + `nargo`/`bb` prover driver (canonical proving path) |
+| `luai-verifier` | Small helper binaries (e.g. `policy-hash` prints the canonical policy commitment) |
 
 Core library features: `default = ["std"]`, optional `serde`, optional `zkvm`. The `zkvm` feature exposes `PublicInputs` / commitment helpers used by the Noir proving path.
 
@@ -89,18 +90,34 @@ Programs invoke tools via `tool.call(name, args)`:
 
 ## Proving pipeline
 
+Canonical Noir-only flow, end-to-end. Steps 1–3 are also driven in one shot by
+the orchestrator's `--prove` flag; step 4 lives in `demo-noir-e2e.sh` (and its
+local-anvil wrapper `demo-noir-e2e-local.sh`).
+
 ```bash
-# 1. Compile
+# 1. Compile Lua source -> verified bytecode JSON
 cargo run -p luai-compiler -- source.lua compiled.json
 
-# 2. Dry run (executes with live host, records oracle tape + public inputs)
+# 2. Dry-run with the live host -> oracle tape + public inputs
 cargo run -p luai-prover -- compiled.json dry_result.json
 
-# 3. Generate the Noir proof
+# 3. Generate the Noir UltraHonk proof
 cargo run -p luai-noir -- compiled.json dry_result.json --prove
+
+# 1+2+3 in one shot: orchestrator --prove also invokes luai-noir and prints the
+# proof bytes + canonical bytes32[] public inputs ready for on-chain submission.
+cargo run -p luai-orchestrator -- "<task>" --prove
+
+# 4. Submit on chain to LuaiConsumer.consumeResult (or LuaiVerifier.verify).
+#    The demo script handles the full LLM -> proof -> chain flow locally.
+ANTHROPIC_API_KEY=… bash demo-noir-e2e-local.sh "<task>"
 ```
 
-Public inputs commit to: program hash, input hash, tool responses hash, output hash. Or use `--prove` in the orchestrator to run steps 1–2 automatically.
+Public inputs (8, in circuit-declaration order): `num_steps`, `program_hash`,
+`return_value`, `tool_responses_hash`, `input_hash`, `output_hash`,
+`tls_attestation_hash`, `policy_hash`. The Solidity `PublicInputs` struct in
+`contracts/src/Types.sol` mirrors this ordering exactly; reordering breaks
+verification.
 
 ## Architecture
 

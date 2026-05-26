@@ -68,6 +68,28 @@ struct PublicInputs {
 
 Reordering fields breaks verification.
 
+### Invariant — keep these in sync
+
+Any change to the `pub` declarations in `noir/src/main.nr` — adding a field,
+removing one, reordering, or changing a width — invalidates the on-chain
+verifier. After such a change you **must** do all three of the following:
+
+1. Regenerate `HonkVerifier.sol`:
+   ```bash
+   nargo execute --program-dir noir
+   bb write_vk -b noir/target/trace_verifier.json -o noir/target -t evm
+   bb write_solidity_verifier -k noir/target/vk -o contracts/src/HonkVerifier.sol -t evm
+   ```
+2. Update `PublicInputs` in `src/Types.sol` to match the new declaration order
+   (field-for-field) and bump `LUAI_PUBLIC_INPUTS_LENGTH` if the wire-format
+   total changed.
+3. Update `PublicInputsLib.pack` so each scalar / `[u8; 32]` field is written
+   into the `bytes32[]` at the same offset that `bb prove -t evm` produces.
+
+The Rust-side `bytes32[]` ordering in `orchestrator/src/prove.rs`
+(`build_proof_artifacts_with_noir`) and any test fixtures under
+`contracts/test/fixtures/` must be regenerated to match.
+
 ## Output payload schema
 
 `LuaiConsumer.consumeResult` expects `outputPayload` to be:

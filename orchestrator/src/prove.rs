@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use luai::{
     compiler::proto::CompiledProgram,
@@ -8,6 +11,7 @@ use luai::{
     vm::engine::VmOutput,
     zkvm::commitment::{PublicInputs, compute_public_inputs},
 };
+use luai_noir::{ProveOptions, ProveOutputError, prove_from_artifacts};
 use luai_prover::prover::DryRunResult;
 
 /// Paths and public inputs produced by `build_proof_artifacts`.
@@ -15,6 +19,19 @@ pub struct ProveArtifacts {
     pub compiled_path: PathBuf,
     pub dry_result_path: PathBuf,
     pub public_inputs: PublicInputs,
+    pub noir_proof: Option<NoirProveSummary>,
+}
+
+/// In-memory summary of a Noir proof generated alongside the JSON artifacts.
+pub struct NoirProveSummary {
+    pub proof_bytes: Vec<u8>,
+    /// 8-element `bytes32[]` in circuit-declaration order:
+    /// `[num_steps, program_hash, return_value, tool_responses_hash,
+    ///   input_hash, output_hash, tls_attestation_hash, policy_hash]`.
+    /// Each element is a 0x-prefixed 32-byte hex string.
+    pub public_inputs_hex: Vec<String>,
+    pub prove_duration_ms: u128,
+    pub verified: bool,
 }
 
 /// Build ZK proof artifacts from a completed execution.
@@ -75,7 +92,96 @@ pub fn build_proof_artifacts(
         compiled_path,
         dry_result_path,
         public_inputs,
+        noir_proof: None,
     })
+}
+
+/// Same as `build_proof_artifacts`, but additionally invokes the Noir prover
+/// over the produced artifacts and populates `noir_proof`.
+///
+/// `circuit_dir` must point at the Noir circuit (the directory containing
+/// `Nargo.toml`). On a successful proof, `noir_proof` carries the proof bytes,
+/// the canonical 8-element `bytes32[]` public inputs, prove duration, and a
+/// verify flag. Verification is always attempted.
+pub fn build_proof_artifacts_with_noir(
+    program: &CompiledProgram,
+    input: &LuaValue,
+    output: VmOutput,
+    tls_attestations: Vec<TlsAttestationRecord>,
+    output_dir: &str,
+    circuit_dir: &Path,
+) -> Result<ProveArtifacts, String> {
+    let mut artifacts =
+        build_proof_artifacts(program, input, output, tls_attestations, output_dir)?;
+
+    // Reconstruct the `DryRunResult` from the freshly written JSON so we
+    // share the exact bytes the standalone luai-noir CLI would consume.
+    let dry_json = fs::read_to_string(&artifacts.dry_result_path).map_err(|e| {
+        format!(
+            "failed to read {}: {e}",
+            artifacts.dry_result_path.display()
+        )
+    })?;
+    let dry_run_result: DryRunResult = serde_json::from_str(&dry_json)
+        .map_err(|e| format!("failed to parse dry_result.json: {e}"))?;
+
+    let opts = ProveOptions {
+        circuit_dir: circuit_dir.to_path_buf(),
+        do_verify: true,
+    };
+
+    match prove_from_artifacts(program, &dry_run_result, &opts) {
+        Ok(out) => {
+            let pi = &artifacts.public_inputs;
+            let public_inputs_hex = vec![
+                u32_to_bytes32_hex(out.witness.num_steps),
+                bytes32_hex(&pi.program_hash),
+                i64_to_bytes32_hex(out.witness.return_value),
+                bytes32_hex(&pi.tool_responses_hash),
+                bytes32_hex(&pi.input_hash),
+                bytes32_hex(&pi.output_hash),
+                bytes32_hex(&pi.tls_attestation_hash),
+                bytes32_hex(&pi.policy_hash),
+            ];
+            artifacts.noir_proof = Some(NoirProveSummary {
+                proof_bytes: out.proof.proof_bytes,
+                public_inputs_hex,
+                prove_duration_ms: out.proof.prove_duration.as_millis(),
+                verified: out.verified,
+            });
+            Ok(artifacts)
+        }
+        Err(e) => Err(format_prove_error(&e)),
+    }
+}
+
+fn format_prove_error(e: &ProveOutputError) -> String {
+    format!("noir proof generation failed: {e}")
+}
+
+/// 0x-prefixed 32-byte hex of `bytes`.
+fn bytes32_hex(bytes: &[u8; 32]) -> String {
+    let mut out = String::with_capacity(2 + 64);
+    out.push_str("0x");
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+/// `u32` left-padded to 32 bytes big-endian.
+fn u32_to_bytes32_hex(v: u32) -> String {
+    let mut buf = [0u8; 32];
+    buf[28..].copy_from_slice(&v.to_be_bytes());
+    bytes32_hex(&buf)
+}
+
+/// `i64` sign-extended (two's complement) to 32 bytes big-endian.
+fn i64_to_bytes32_hex(v: i64) -> String {
+    let fill = if v < 0 { 0xFFu8 } else { 0x00u8 };
+    let mut buf = [fill; 32];
+    buf[24..].copy_from_slice(&v.to_be_bytes());
+    bytes32_hex(&buf)
 }
 
 fn hex(hash: &[u8; 32]) -> String {
@@ -111,12 +217,59 @@ pub fn format_prove_section(artifacts: &ProveArtifacts) -> String {
         artifacts.dry_result_path.display()
     ));
     out.push('\n');
-    out.push_str("  Next steps:\n");
-    out.push_str(&format!(
-        "    cargo run -p luai-noir -- {} {} --prove\n",
-        artifacts.compiled_path.display(),
-        artifacts.dry_result_path.display(),
-    ));
+
+    match &artifacts.noir_proof {
+        Some(np) => {
+            out.push_str("── Noir Proof ─────────────────────────────────\n");
+            out.push_str(&format!(
+                "  Proof bytes:    {} bytes\n",
+                np.proof_bytes.len()
+            ));
+            out.push_str(&format!(
+                "  Prove duration: {:.2}s\n",
+                np.prove_duration_ms as f64 / 1000.0
+            ));
+            out.push_str(&format!(
+                "  Verified:       {}\n",
+                if np.verified { "yes" } else { "no" }
+            ));
+            out.push('\n');
+            out.push_str("  Public inputs (bytes32[8], canonical order):\n");
+            const LABELS: [&str; 8] = [
+                "num_steps           ",
+                "program_hash        ",
+                "return_value        ",
+                "tool_responses_hash ",
+                "input_hash          ",
+                "output_hash         ",
+                "tls_attestation_hash",
+                "policy_hash         ",
+            ];
+            for (label, hexstr) in LABELS.iter().zip(np.public_inputs_hex.iter()) {
+                out.push_str(&format!("    [{label}] {hexstr}\n"));
+            }
+            out.push('\n');
+            out.push_str("  Submit on-chain (example):\n");
+            out.push_str("    cast send <VERIFIER_ADDRESS> 'submit(bytes,bytes32[])' \\\n");
+            out.push_str("      <proof-hex> \\\n");
+            out.push_str("      \"[");
+            for (i, hexstr) in np.public_inputs_hex.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(hexstr);
+            }
+            out.push_str("]\"\n");
+        }
+        None => {
+            out.push_str("  Next steps:\n");
+            out.push_str(&format!(
+                "    cargo run -p luai-noir -- {} {} --prove\n",
+                artifacts.compiled_path.display(),
+                artifacts.dry_result_path.display(),
+            ));
+        }
+    }
 
     out
 }
@@ -212,7 +365,7 @@ return 1"#;
     fn format_section_contains_all_hashes() {
         let dir = tempfile::tempdir().unwrap();
         let (program, output) = run_program("return 42");
-        let artifacts = build_proof_artifacts(
+        let mut artifacts = build_proof_artifacts(
             &program,
             &LuaValue::Nil,
             output,
@@ -220,6 +373,24 @@ return 1"#;
             dir.path().to_str().unwrap(),
         )
         .unwrap();
+
+        // Inject a synthetic Noir proof summary so the format helper renders
+        // the proof block without invoking nargo/bb.
+        artifacts.noir_proof = Some(NoirProveSummary {
+            proof_bytes: vec![0xAA; 128],
+            public_inputs_hex: vec![
+                u32_to_bytes32_hex(7),
+                bytes32_hex(&artifacts.public_inputs.program_hash),
+                i64_to_bytes32_hex(42),
+                bytes32_hex(&artifacts.public_inputs.tool_responses_hash),
+                bytes32_hex(&artifacts.public_inputs.input_hash),
+                bytes32_hex(&artifacts.public_inputs.output_hash),
+                bytes32_hex(&artifacts.public_inputs.tls_attestation_hash),
+                bytes32_hex(&artifacts.public_inputs.policy_hash),
+            ],
+            prove_duration_ms: 1234,
+            verified: true,
+        });
 
         let section = format_prove_section(&artifacts);
         assert!(section.contains("ZK Proof Artifacts"));
@@ -229,7 +400,63 @@ return 1"#;
         assert!(section.contains("Output hash:"));
         assert!(section.contains("compiled.json"));
         assert!(section.contains("dry_result.json"));
-        assert!(section.contains("luai-noir"));
+        assert!(section.contains("Proof bytes:"));
+        assert!(section.contains("Verified:"));
+        assert!(section.contains("cast send"));
+    }
+
+    #[test]
+    fn bytes32_helpers_pad_correctly() {
+        assert_eq!(
+            u32_to_bytes32_hex(0),
+            "0x0000000000000000000000000000000000000000000000000000000000000000"
+        );
+        assert_eq!(
+            u32_to_bytes32_hex(1),
+            "0x0000000000000000000000000000000000000000000000000000000000000001"
+        );
+        assert_eq!(
+            i64_to_bytes32_hex(42),
+            "0x000000000000000000000000000000000000000000000000000000000000002a"
+        );
+        // -1 sign-extends to all-FF.
+        assert_eq!(
+            i64_to_bytes32_hex(-1),
+            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        );
+        // -2 → ...fffffffe.
+        assert_eq!(
+            i64_to_bytes32_hex(-2),
+            "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+        );
+    }
+
+    /// Exercises the full Noir proving path through the orchestrator helper.
+    /// Requires `nargo` and `bb` on `PATH`; gated behind the
+    /// `noir-prove` feature so default CI runs skip it.
+    #[test]
+    #[cfg_attr(not(feature = "noir-prove"), ignore)]
+    fn build_proof_artifacts_with_noir_produces_verified_proof() {
+        let dir = tempfile::tempdir().unwrap();
+        let circuit_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../noir");
+
+        let (program, output) = run_program("return 1 + 2");
+        let artifacts = build_proof_artifacts_with_noir(
+            &program,
+            &LuaValue::Nil,
+            output,
+            vec![],
+            dir.path().to_str().unwrap(),
+            &circuit_dir,
+        )
+        .expect("build_proof_artifacts_with_noir failed");
+
+        let np = artifacts
+            .noir_proof
+            .expect("noir_proof should be populated");
+        assert!(np.verified, "proof should verify");
+        assert_eq!(np.public_inputs_hex.len(), 8);
+        assert!(!np.proof_bytes.is_empty());
     }
 
     #[test]

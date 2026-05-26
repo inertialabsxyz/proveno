@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 luai = { path = "..", features = ["serde", "std", "zkvm"] }
 luai_prover = { path = "../prover" }
+luai-noir = { path = "../luai-noir" }
 luai-verifier = { path = "../verifier" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -13,6 +14,11 @@ reqwest = { version = "0.12", features = ["json", "blocking"] }
 clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
 dotenvy = "0.15"
+
+[features]
+# Enables the slow end-to-end Noir prove/verify integration test. Requires
+# `nargo` and `bb` on PATH; off by default so plain `cargo test` stays fast.
+noir-prove = []
 
 [dev-dependencies]
 tempfile = "3"

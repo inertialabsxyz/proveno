@@ -1773,6 +1773,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "luai",
+ "luai-noir",
  "luai-verifier",
  "luai_prover",
  "reqwest",

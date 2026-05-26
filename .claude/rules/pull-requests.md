@@ -1,6 +1,8 @@
 # Pull Requests
 
-When all commits on a branch are done, `make check` passes, and the review agent has reported back, push and open a PR automatically.
+When all commits on a branch are done, `make check` passes, `make test-prove` passes, and the review agent has reported back, push and open a PR automatically.
+
+`make test-prove` is the pre-PR gate that runs the Noir nargo+bb prove/verify pipeline (`luai-noir/tests/prove.rs`). It is not included in `make check` because of its ~20 s runtime and `nargo` + `bb` toolchain requirement, but it must pass before opening a PR. Each test prints prove and verify wall-time; capture the numbers in the PR body when the change is expected to move them (e.g. circuit-bound tuning, encoder changes).
 
 - **Target:** always `main`
 - **State:** always open as **draft**

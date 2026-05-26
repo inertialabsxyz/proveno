@@ -8,10 +8,13 @@ make lint              # cargo fmt --check + cargo clippy -D warnings
 make test              # all tests: unit + integration
 make test-unit         # cargo test --lib  (in-module unit tests)
 make test-integration  # cargo test --tests  (tests/*.rs integration files)
+make test-prove        # Noir nargo+bb pipeline (pre-PR gate; slow, prints prove/verify times)
 make fix               # auto-format + apply safe clippy fixes
 ```
 
-`make check` is the hard gate. Run it before every commit. If it fails, fix before continuing.
+`make check` is the hard pre-commit gate. Run it before every commit. If it fails, fix before continuing.
+
+`make test-prove` is the **pre-PR** gate. It is not part of `make check` because it takes ~20 s and requires `nargo` + `bb` on `PATH`, but it must pass before opening a PR — especially for any change touching the Noir circuit (`noir/`), witness writer (`luai-noir/`), oracle tape, canonical serialization, or program/trace encoders. It prints prove/verify wall-time per test so regressions in circuit size or prove time are visible from the test output.
 
 Plain `cargo test` (the gate documented in `CLAUDE.md`) runs the same suite as `make test` and is acceptable when you only need the test pass; use `make check` when committing.
 
@@ -85,3 +88,25 @@ If you add or modify zkvm/serde-gated code, run the feature-flagged tests locall
 | Determinism (replay → identical hashes) | Integration; record then replay, assert hash equality | `tests/integration.rs` |
 | TLS attestation | Feature-gated integration | `tls_attestation_nonzero_for_p256`, `tls_degrades_cleanly_for_non_p256` |
 | ZK commitment / public inputs | Unit + feature-gated integration | `src/zkvm/commitment.rs`, `--features zkvm` |
+| Noir circuit + nargo+bb prove/verify pipeline | Integration in `luai-noir/tests/prove.rs` | `cargo test -p luai-noir --test prove` |
+
+## Noir prove/verify benchmark
+
+`luai-noir/tests/prove.rs` drives the full `nargo execute → bb write_vk → bb prove → bb verify` pipeline. Every test prints prove and verify wall-time so regressions in circuit size / prove time are visible from the test output. Use this when tuning circuit bounds (`MAX_TOOL_CALLS`, `MAX_STEPS`, etc.):
+
+```bash
+make test-prove
+# end_to_end_prove_and_verify: prove=4.35s
+# end_to_end_prove_and_verify: verify=0.02s
+# multi_function_proves_correctly: prove=4.32s
+# multi_function_proves_correctly: verify=0.02s
+# ...
+```
+
+Or, to run a single test, e.g. when iterating:
+
+```bash
+cargo test -p luai-noir --test prove end_to_end_prove_and_verify -- --nocapture
+```
+
+Requires `nargo` and `bb` on `PATH`. Tampered-witness tests (`tampered_*`) bail out before `bb prove` runs so their times will be much lower (~0.6 s) — only the success-path tests are useful as benchmarks.

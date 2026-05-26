@@ -22,6 +22,11 @@ x509-cert = { version = "0.2", default-features = false }
 webpki-roots = { version = "0.26" }
 # RSA signature verification for cert chains where intermediate/root CAs use RSA
 rsa = { version = "0.9", default-features = false }
+# Poseidon2 hashing for Noir-circuit-friendly commitments.
+# Pulls in the noir-lang acir/acvm ecosystem; this breaks no_std/zkvm builds
+# (OpenVM is out of scope for the current migration).
+acir = "0.46"
+bn254_blackbox_solver = "0.46"
 
 [dev-dependencies]
 serde_json = "1"

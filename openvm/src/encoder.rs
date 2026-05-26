@@ -3,7 +3,7 @@ use std::error::Error;
 use std::{fs, path::PathBuf};
 
 use luai::compiler::CompiledProgram;
-use luai_prover::prover::DryRunResult;
+use luai::zkvm::dry_run_result::DryRunResult;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]

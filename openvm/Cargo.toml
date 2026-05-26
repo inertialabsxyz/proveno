@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 luai = { path = "..", default-features = false, features = ["zkvm", "serde"] }
-luai_prover = { path = "../prover" }
 luai-verifier = { path = "../verifier" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -6,26 +6,14 @@ use luai::{
     policy::OraclePolicy,
     tls::TlsAttestationRecord,
     types::value::LuaValue,
-    vm::engine::{HostInterface, Vm, VmConfig, VmOutput},
+    vm::engine::{HostInterface, Vm, VmConfig},
     zkvm::{
-        commitment::{PublicInputs, compute_public_inputs, compute_public_inputs_with_policy},
+        commitment::{compute_public_inputs, compute_public_inputs_with_policy},
         guest_input::GuestInput,
     },
 };
-use serde::{Deserialize, Serialize};
 
-/// Result of a dry run: the VM output, oracle tape, TLS attestations, and
-/// the public inputs computed from all of the above.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DryRunResult {
-    pub output: VmOutput,
-    pub oracle_tape: OracleTape,
-    /// TLS attestation records captured during HTTP(S) tool calls.
-    /// Empty when the host does not make HTTPS calls or does not support
-    /// TLS attestation.
-    pub tls_attestations: Vec<TlsAttestationRecord>,
-    pub public_inputs: PublicInputs,
-}
+pub use luai::zkvm::dry_run_result::DryRunResult;
 
 /// Executes Lua programs and (optionally) proves executions in the zkVM.
 pub struct Prover<H: HostInterface> {

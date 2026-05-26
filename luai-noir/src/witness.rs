@@ -10,7 +10,7 @@ use luai::zkvm::commitment::{hash_input, hash_output};
 use luai::{OracleTape, TapeEntry};
 
 pub const MAX_BYTECODE: usize = 512;
-pub const MAX_STEPS: usize = 16384;
+pub const MAX_STEPS: usize = 2048;
 pub const MAX_TOOL_CALLS: usize = 64;
 pub const MAX_TAPE_ENTRY_BYTES: usize = 1024;
 pub const MAX_CERTS: usize = 4;
@@ -18,6 +18,7 @@ pub const MAX_CERTS: usize = 4;
 pub struct NoirWitness {
     pub bytecode_opcodes: [u8; MAX_BYTECODE],
     pub bytecode_operands: [i64; MAX_BYTECODE],
+    pub instr_count: u32,
     pub trace_pcs: [u32; MAX_STEPS],
     pub trace_opcodes: [u8; MAX_STEPS],
     pub trace_operands: [i64; MAX_STEPS],
@@ -90,6 +91,7 @@ pub fn build_witness(
     // Bytecode.
     w.bytecode_opcodes = bytecode.opcodes;
     w.bytecode_operands = bytecode.operands;
+    w.instr_count = bytecode.instr_count as u32;
 
     // Trace.
     w.num_steps = trace.len() as u32;
@@ -171,6 +173,7 @@ pub fn write_prover_toml(witness: &NoirWitness, path: &Path) -> io::Result<()> {
     ));
 
     // Private witness arrays.
+    out.push_str(&format!("instr_count = {}\n", witness.instr_count));
     out.push_str(&format!(
         "bytecode_opcodes = [{}]\n",
         bytes_toml(&witness.bytecode_opcodes)
@@ -213,8 +216,9 @@ pub fn write_prover_toml(witness: &NoirWitness, path: &Path) -> io::Result<()> {
         rows_toml(witness.tape_entry_data.iter().map(|r| r.as_slice()))
     ));
 
-    // TLS witnesses.
-    out.push_str(&format!("num_certs = {}\n", witness.num_certs));
+    // TLS witnesses. `num_certs` is intentionally not emitted: the circuit's
+    // `main` does not currently take a cert-count parameter, so writing one
+    // would cause nargo to reject the Prover.toml as an unexpected argument.
     out.push_str(&format!(
         "cert_public_key_x = [{}]\n",
         rows_toml(witness.cert_public_key_x.iter().map(|r| r.as_slice()))
@@ -376,7 +380,7 @@ mod tests {
         assert!(contents.contains("output_hash = ["));
         assert!(contents.contains("tls_attestation_hash = ["));
         assert!(contents.contains("policy_hash = ["));
-        assert!(contents.contains("num_certs ="));
+        assert!(!contents.contains("num_certs ="));
         assert!(contents.contains("cert_public_key_x = ["));
         assert!(contents.contains("cert_signatures = ["));
     }
@@ -397,13 +401,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(witness.num_tool_calls, 0);
-        // SHA-256 of empty input
-        let expected_hash: [u8; 32] = [
-            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
-            0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
-            0x78, 0x52, 0xb8, 0x55,
-        ];
-        assert_eq!(witness.tool_responses_hash, expected_hash);
+        // Empty-tape commitment is the Poseidon2 sponge digest of zero leaves;
+        // assert parity with the tape implementation rather than pinning bytes.
+        assert_eq!(
+            witness.tool_responses_hash,
+            OracleTape::new().commitment_hash()
+        );
     }
 
     #[test]

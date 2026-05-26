@@ -9,19 +9,23 @@
 //! same return value) without making any external calls, which makes it
 //! suitable for execution inside a zkVM guest.
 
+use crate::{
+    host::{
+        canonicalize::canonical_deserialize,
+        poseidon2::{
+            bytes_to_fields, field_to_be_bytes32, poseidon2_hash, u8_to_field, u32_to_field,
+        },
+        transcript::ToolCallRecord,
+    },
+    types::{table::LuaTable, value::LuaValue},
+    vm::engine::HostInterface,
+};
 #[cfg(not(feature = "std"))]
 use alloc::{
     borrow::ToOwned,
     format,
     string::{String, ToString},
     vec::Vec,
-};
-use sha2::{Digest, Sha256};
-
-use crate::{
-    host::{canonicalize::canonical_deserialize, transcript::ToolCallRecord},
-    types::{table::LuaTable, value::LuaValue},
-    vm::engine::HostInterface,
 };
 
 // ── TapeEntry ────────────────────────────────────────────────────────────────
@@ -72,33 +76,49 @@ impl OracleTape {
         OracleTape { entries }
     }
 
-    /// SHA-256 commitment over all tape entries in order.
+    /// Poseidon2 commitment over all tape entries in order.
     ///
-    /// Encoding per entry:
-    /// - 1 byte tag: `0x00` = Ok, `0x01` = Err
-    /// - 4-byte little-endian length of payload
-    /// - payload bytes
+    /// Two-level hash: each entry is hashed individually into a leaf Field
+    /// element, then the concatenated leaves are hashed once more:
+    ///
+    /// ```text
+    ///     leaf_i      = Poseidon2( tag, len, payload_byte_0, ..., payload_byte_{m-1} )
+    ///     commitment  = Poseidon2( leaf_0, leaf_1, ..., leaf_{n-1} )
+    /// ```
+    ///
+    /// Per-entry encoding (as Field elements, one byte per field):
+    /// - 1 Field: tag (`0x00` = Ok, `0x01` = Err)
+    /// - 1 Field: payload length in bytes
+    /// - 1 Field per payload byte
+    ///
+    /// The two-level structure matches the Noir circuit, which feeds the same
+    /// (tag, len, payload-as-fields) tuple into `Poseidon2::hash` and then
+    /// hashes the resulting leaves together for the outer commitment. Each
+    /// hash output is a BN254 Field element; it is returned here as 32-byte
+    /// big-endian so the public-input wire shape stays `[u8; 32]`.
+    ///
+    /// An empty tape commits to `Poseidon2([])` — a fixed sponge-IV-only
+    /// digest derived from the zero-length domain separator.
     pub fn commitment_hash(&self) -> [u8; 32] {
-        let mut h = Sha256::new();
-        for entry in &self.entries {
-            match entry {
-                TapeEntry::Ok(bytes) => {
-                    h.update([0x00u8]);
-                    h.update((bytes.len() as u32).to_le_bytes());
-                    h.update(bytes);
-                }
-                TapeEntry::Err(msg) => {
-                    let msg_bytes = msg.as_bytes();
-                    h.update([0x01u8]);
-                    h.update((msg_bytes.len() as u32).to_le_bytes());
-                    h.update(msg_bytes);
-                }
-            }
-        }
-        h.finalize().into()
+        let leaves: Vec<_> = self
+            .entries
+            .iter()
+            .map(|entry| {
+                let (tag, payload): (u8, &[u8]) = match entry {
+                    TapeEntry::Ok(bytes) => (0x00, bytes.as_slice()),
+                    TapeEntry::Err(msg) => (0x01, msg.as_bytes()),
+                };
+                let mut inputs = Vec::with_capacity(2 + payload.len());
+                inputs.push(u8_to_field(tag));
+                inputs.push(u32_to_field(payload.len() as u32));
+                inputs.extend(bytes_to_fields(payload));
+                poseidon2_hash(&inputs)
+            })
+            .collect();
+        field_to_be_bytes32(poseidon2_hash(&leaves))
     }
 
-    /// Hex-encoded SHA-256 commitment hash (64 lowercase hex chars).
+    /// Hex-encoded Poseidon2 commitment hash (64 lowercase hex chars).
     pub fn commitment_hash_hex(&self) -> String {
         self.commitment_hash()
             .iter()

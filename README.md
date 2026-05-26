@@ -10,7 +10,7 @@ Scripts run as single-shot programs: they receive an input object, may invoke ho
 - **Sandboxed** — no filesystem, network, or OS access; tools are the only external interface
 - **Bounded** — gas, memory, depth, and output limits guarantee termination
 - **Integer-only arithmetic** — signed 64-bit; use fixed-point for fractional values
-- **ZK-provable** — two-phase execution model with OpenVM integration
+- **ZK-provable** — two-phase execution model proved via Noir (`luai-noir` + `nargo`/`bb`)
 
 ## Workspace
 
@@ -19,8 +19,12 @@ Scripts run as single-shot programs: they receive an input object, may invoke ho
 | `luai` | Core library — parser, compiler, bytecode verifier, VM, host, oracle tape |
 | `compiler` | CLI: compile Lua source → verified bytecode JSON |
 | `prover` | CLI: dry-run compiled programs, produce oracle tapes and public inputs |
-| `openvm` | OpenVM guest + encoder for zk proof generation and verification |
+| `luai-noir` | Noir witness writer + `nargo`/`bb` driver — the canonical proving path |
 | `orchestrator` | LLM-driven agentic pipeline — accepts a task, generates and executes Lua |
+
+> Noir is the canonical proving path. The historical OpenVM implementation has been
+> archived on the `archive/openvm` branch — see that branch for the previous guest,
+> encoder, on-chain verifier, and `zkvm-prove.sh` pipeline.
 
 ## Architecture
 
@@ -52,10 +56,9 @@ host/            — HostInterface for tool calls; transcript recording;
 2. Dry run       luai-prover compiled.json dry_result.json
                  → executes with live host, records oracle tape
                  → computes public inputs (SHA-256 commitments)
-3. Encode        luai-openvm-encoder compiled.json dry_result.json
-                 → serializes guest input for OpenVM
-4. Prove         openvm guest replays execution against oracle tape
-                 → verifies public inputs match
+3. Prove         cargo run -p luai-noir -- compiled.json dry_result.json --prove
+                 → builds the Noir witness, drives `nargo execute` +
+                   `bb prove`/`bb verify` against the trace circuit
 ```
 
 Public inputs commit to: program hash, input hash, tool responses hash, output hash.
@@ -119,7 +122,7 @@ With `--prove`, the orchestrator generates ZK proof artifacts after successful e
 cargo run -p luai-orchestrator -- --prove "score this wallet for onchain reputation"
 ```
 
-This produces `proof-output/compiled.json` and `proof-output/dry_result.json` — the inputs needed to generate a cryptographic proof via OpenVM. The proof attests that:
+This produces `proof-output/compiled.json` and `proof-output/dry_result.json` — the inputs needed to generate a cryptographic proof via the Noir circuit. The proof attests that:
 
 - **This specific program** was executed (program hash)
 - **These specific API responses** were consumed (tool responses hash)

@@ -113,7 +113,7 @@ pub fn format_prove_section(artifacts: &ProveArtifacts) -> String {
     out.push('\n');
     out.push_str("  Next steps:\n");
     out.push_str(&format!(
-        "    cargo run -p luai-openvm --bin luai-openvm-encoder -- \\\n      {} {}\n",
+        "    cargo run -p luai-noir -- {} {} --prove\n",
         artifacts.compiled_path.display(),
         artifacts.dry_result_path.display(),
     ));
@@ -229,7 +229,7 @@ return 1"#;
         assert!(section.contains("Output hash:"));
         assert!(section.contains("compiled.json"));
         assert!(section.contains("dry_result.json"));
-        assert!(section.contains("luai-openvm-encoder"));
+        assert!(section.contains("luai-noir"));
     }
 
     #[test]

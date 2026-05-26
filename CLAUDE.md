@@ -57,9 +57,9 @@ There is no separate lint command; `cargo test` exercises the full suite includi
 | `luai-compiler` | CLI: compiles Lua source → verified bytecode JSON |
 | `luai-prover` | CLI: dry-runs bytecode, produces oracle tape + public inputs |
 | `luai-orchestrator` | LLM-driven agent loop (Claude API + live tool execution) |
-| `luai-openvm` | OpenVM guest + encoder for ZK proof generation |
+| `luai-noir` | Noir witness writer + `nargo`/`bb` prover driver (canonical proving path) |
 
-Core library features: `default = ["std"]`, optional `serde`, optional `zkvm`. `luai-guest` (inside luai-openvm) builds with `no-default-features + zkvm + serde` for the no_std zkVM environment.
+Core library features: `default = ["std"]`, optional `serde`, optional `zkvm`. The `zkvm` feature exposes `PublicInputs` / commitment helpers used by the Noir proving path.
 
 ## Resource limits (defaults)
 
@@ -96,10 +96,8 @@ cargo run -p luai-compiler -- source.lua compiled.json
 # 2. Dry run (executes with live host, records oracle tape + public inputs)
 cargo run -p luai-prover -- compiled.json dry_result.json
 
-# 3. Encode for OpenVM
-luai-openvm-encoder compiled.json dry_result.json
-
-# 4. Prove (OpenVM guest replays against oracle tape, verifies public inputs)
+# 3. Generate the Noir proof
+cargo run -p luai-noir -- compiled.json dry_result.json --prove
 ```
 
 Public inputs commit to: program hash, input hash, tool responses hash, output hash. Or use `--prove` in the orchestrator to run steps 1–2 automatically.

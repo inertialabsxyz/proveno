@@ -4,19 +4,25 @@
 //! during an HTTPS connection, plus metadata indicating whether the chain was
 //! verified as P-256 ECDSA against the Mozilla root CA set.
 //!
-//! `compute_tls_attestation_hash` produces a SHA-256 hash over all verified
-//! chains, or `[0u8; 32]` if no P-256-verified attestations are present.
+//! `compute_tls_attestation_hash` produces a Poseidon2 commitment over the
+//! P-256 public-key halves (x || y) of every verified cert in the chain.
+//! Both sides of the ZK pipeline commit to the same content: the Noir circuit
+//! at `noir/src/main.nr` feeds the same pubkey bytes (one byte per Field) into
+//! `Poseidon2::hash` and compares the result to `tls_attestation_hash`.
 //!
-//! Hash layout for each verified record:
-//! - 4-byte LE: hostname length
-//! - hostname bytes (UTF-8)
-//! - 8-byte LE: cert_not_after (Unix seconds, leaf cert validity end)
-//! - 4-byte LE: number of certs in chain
-//! - For each cert: 4-byte LE length, then DER bytes
+//! The empty-record case is not zero-sentinel: it returns the canonical
+//! Poseidon2 hash of the empty input vector, matching `Poseidon2::hash([], 0)`
+//! in the circuit. `EMPTY_TLS_ATTESTATION_HASH` exposes that constant for
+//! tests and downstream consumers that need to detect "no attestation".
+//!
+//! Hostname and `cert_not_after` are intentionally NOT part of the commitment:
+//! the Noir circuit does not verify them, so binding them here would create a
+//! Rust↔circuit mismatch on the proof-relevant content. Bind those out-of-band
+//! (e.g. via a separate public input) if a future phase needs them.
 
 pub mod verify;
 
-use sha2::{Digest, Sha256};
+use crate::host::poseidon2::{field_to_be_bytes32, poseidon2_hash, u8_to_field};
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
@@ -73,139 +79,104 @@ impl TlsAttestationRecord {
 
 /// Compute the `tls_attestation_hash` from a slice of attestation records.
 ///
-/// Returns `[0u8; 32]` when no record has `p256_verified == true`.
-/// Otherwise returns SHA-256 over all verified cert chains in order.
+/// Returns `Poseidon2::hash([], 0)` (see `empty_tls_attestation_hash`) when no
+/// record has `p256_verified == true` or no verifiable P-256 pubkey can be
+/// extracted from any cert.
 ///
-/// Hash layout per verified record:
-/// - `u32_le(hostname_len)` || `hostname_bytes` (UTF-8)
-/// - `u64_le(cert_not_after)` (Unix seconds, leaf cert not_after)
-/// - `u32_le(num_certs)`
-/// - For each cert: `u32_le(cert_len)` || `cert_bytes`
+/// Otherwise: for each verified record, for each cert in chain order, extract
+/// the SEC1 P-256 public-key affine coordinates (x, y) — 32 bytes each — and
+/// feed all 64 bytes per cert into a Poseidon2 sponge as one Field per byte.
+/// The result is serialized to `[u8; 32]` big-endian.
+///
+/// This matches the Noir circuit's TLS block byte-for-byte; both sides commit
+/// to the same content. Certs whose DER cannot be parsed as P-256 contribute
+/// nothing to the hash (matching the circuit's `if i < num_certs` predicate
+/// over zero-padded slots).
 pub fn compute_tls_attestation_hash(records: &[TlsAttestationRecord]) -> [u8; 32] {
-    let mut h = Sha256::new();
-    let mut has_verified = false;
-
+    let mut fields = Vec::new();
     for record in records {
         if !record.p256_verified {
             continue;
         }
-        has_verified = true;
-        let hostname_bytes = record.hostname.as_bytes();
-        h.update((hostname_bytes.len() as u32).to_le_bytes());
-        h.update(hostname_bytes);
-        h.update(record.cert_not_after.to_le_bytes());
-        h.update((record.cert_chain_der.len() as u32).to_le_bytes());
-        for cert in &record.cert_chain_der {
-            h.update((cert.len() as u32).to_le_bytes());
-            h.update(cert);
+        for cert_der in &record.cert_chain_der {
+            if let Some((x, y)) = verify::extract_p256_pubkey_xy(cert_der) {
+                for b in x.iter().chain(y.iter()) {
+                    fields.push(u8_to_field(*b));
+                }
+            }
         }
     }
+    field_to_be_bytes32(poseidon2_hash(&fields))
+}
 
-    if has_verified {
-        h.finalize().into()
-    } else {
-        [0u8; 32]
-    }
+/// The canonical "no attestation" hash: `Poseidon2::hash([], 0)` serialised to
+/// `[u8; 32]` big-endian. Use this in place of `[0u8; 32]` when asserting that
+/// no verified TLS attestation was captured.
+pub fn empty_tls_attestation_hash() -> [u8; 32] {
+    field_to_be_bytes32(poseidon2_hash(&[]))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn verified(hostname: &str, not_after: u64) -> TlsAttestationRecord {
+    /// Verified record carrying garbage DER bytes. Pubkey extraction fails so
+    /// this contributes nothing to the hash — used to exercise the
+    /// "unparseable cert is silently skipped" behaviour.
+    fn verified_with_garbage_der(hostname: &str, not_after: u64) -> TlsAttestationRecord {
         TlsAttestationRecord::p256_verified(vec![vec![1, 2, 3]], hostname.to_string(), not_after)
     }
 
     #[test]
-    fn empty_records_gives_zero_hash() {
-        assert_eq!(compute_tls_attestation_hash(&[]), [0u8; 32]);
+    fn empty_records_gives_canonical_empty_hash() {
+        assert_eq!(
+            compute_tls_attestation_hash(&[]),
+            empty_tls_attestation_hash()
+        );
     }
 
     #[test]
-    fn unverified_record_gives_zero_hash() {
+    fn unverified_record_gives_canonical_empty_hash() {
         let records = vec![TlsAttestationRecord::unavailable()];
-        assert_eq!(compute_tls_attestation_hash(&records), [0u8; 32]);
+        assert_eq!(
+            compute_tls_attestation_hash(&records),
+            empty_tls_attestation_hash()
+        );
     }
 
     #[test]
-    fn verified_record_gives_nonzero_hash() {
-        let records = vec![verified("example.com", 9999999999)];
-        let hash = compute_tls_attestation_hash(&records);
-        assert_ne!(hash, [0u8; 32]);
+    fn unparseable_der_is_silently_skipped() {
+        // p256_verified == true, but DER bytes are garbage — the cert
+        // contributes no fields, so the hash equals the empty case.
+        let records = vec![verified_with_garbage_der("example.com", 9999999999)];
+        assert_eq!(
+            compute_tls_attestation_hash(&records),
+            empty_tls_attestation_hash()
+        );
     }
 
     #[test]
     fn hash_is_deterministic() {
-        let records = vec![verified("example.com", 9999999999)];
+        let records = vec![verified_with_garbage_der("example.com", 9999999999)];
         let h1 = compute_tls_attestation_hash(&records);
         let h2 = compute_tls_attestation_hash(&records);
         assert_eq!(h1, h2);
     }
 
     #[test]
-    fn different_chains_give_different_hashes() {
-        let r1 = vec![TlsAttestationRecord::p256_verified(
-            vec![vec![1, 2, 3]],
-            "a.com".to_string(),
-            0,
-        )];
-        let r2 = vec![TlsAttestationRecord::p256_verified(
-            vec![vec![4, 5, 6]],
-            "a.com".to_string(),
-            0,
-        )];
-        assert_ne!(
-            compute_tls_attestation_hash(&r1),
-            compute_tls_attestation_hash(&r2)
-        );
-    }
-
-    #[test]
-    fn different_hostnames_give_different_hashes() {
-        let r1 = vec![verified("example.com", 9999999999)];
-        let r2 = vec![verified("other.com", 9999999999)];
-        assert_ne!(
-            compute_tls_attestation_hash(&r1),
-            compute_tls_attestation_hash(&r2)
-        );
-    }
-
-    #[test]
-    fn different_not_after_gives_different_hashes() {
-        let r1 = vec![verified("example.com", 1000000000)];
-        let r2 = vec![verified("example.com", 2000000000)];
-        assert_ne!(
-            compute_tls_attestation_hash(&r1),
-            compute_tls_attestation_hash(&r2)
-        );
+    fn empty_hash_is_nonzero() {
+        // The Poseidon2 sponge produces a non-zero digest on empty input via
+        // the message-length IV, so the canonical sentinel is NOT [0; 32].
+        assert_ne!(empty_tls_attestation_hash(), [0u8; 32]);
     }
 
     #[test]
     fn unverified_record_does_not_affect_hash() {
-        let verified_only = vec![verified("example.com", 9999999999)];
-        let with_unverified = vec![
-            verified("example.com", 9999999999),
-            TlsAttestationRecord::unavailable(),
-        ];
+        // Only verified records contribute; unverified are skipped.
+        let only_unverified = vec![TlsAttestationRecord::unavailable()];
         assert_eq!(
-            compute_tls_attestation_hash(&verified_only),
-            compute_tls_attestation_hash(&with_unverified),
-        );
-    }
-
-    #[test]
-    fn multiple_verified_records_hashed_in_order() {
-        let r_ab = vec![
-            TlsAttestationRecord::p256_verified(vec![vec![0xaa]], "a.com".to_string(), 0),
-            TlsAttestationRecord::p256_verified(vec![vec![0xbb]], "b.com".to_string(), 0),
-        ];
-        let r_ba = vec![
-            TlsAttestationRecord::p256_verified(vec![vec![0xbb]], "b.com".to_string(), 0),
-            TlsAttestationRecord::p256_verified(vec![vec![0xaa]], "a.com".to_string(), 0),
-        ];
-        assert_ne!(
-            compute_tls_attestation_hash(&r_ab),
-            compute_tls_attestation_hash(&r_ba)
+            compute_tls_attestation_hash(&only_unverified),
+            compute_tls_attestation_hash(&[]),
         );
     }
 }

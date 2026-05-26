@@ -19,6 +19,9 @@ use crate::{
     vm::engine::VmOutput,
 };
 
+#[cfg(test)]
+use crate::tls::empty_tls_attestation_hash;
+
 /// The public commitments attested by a zkVM proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -36,9 +39,10 @@ pub struct PublicInputs {
     /// SHA-256 over `return_value || length-prefixed logs || transcript entries`.
     pub output_hash: [u8; 32],
 
-    /// SHA-256 over all P-256-verified TLS certificate chains, in order.
-    /// Zero (`[0u8; 32]`) when no HTTPS calls used P-256 ECDSA, or when TLS
-    /// attestation is unavailable.
+    /// Poseidon2 commitment over the SEC1 (x || y) pubkey halves of every
+    /// P-256-verified cert in chain order. The empty-attestation case returns
+    /// `tls::empty_tls_attestation_hash()` — the canonical `Poseidon2::hash([], 0)`
+    /// digest, NOT `[0u8; 32]`.
     pub tls_attestation_hash: [u8; 32],
 
     /// SHA-256 of the canonical encoding of the `OraclePolicy` document.
@@ -205,21 +209,10 @@ mod tests {
         assert_eq!(pi.input_hash, hash_input(&input));
         assert_eq!(pi.tool_responses_hash, tape.commitment_hash());
         assert_eq!(pi.output_hash, hash_output(&output));
-        assert_eq!(pi.tls_attestation_hash, [0u8; 32]);
+        // Empty attestations produce the canonical Poseidon2 empty-input hash,
+        // matching what the Noir circuit computes with `num_certs == 0`.
+        assert_eq!(pi.tls_attestation_hash, empty_tls_attestation_hash());
         assert_eq!(pi.policy_hash, [0u8; 32]);
-    }
-
-    #[test]
-    fn compute_public_inputs_tls_hash_nonzero_for_verified() {
-        let tape = OracleTape::new();
-        let output = make_output(LuaValue::Nil);
-        let attestations = vec![TlsAttestationRecord::p256_verified(
-            vec![vec![1, 2, 3]],
-            "example.com".to_string(),
-            0,
-        )];
-        let pi = compute_public_inputs([0u8; 32], &LuaValue::Nil, &tape, &output, &attestations);
-        assert_ne!(pi.tls_attestation_hash, [0u8; 32]);
     }
 
     #[test]

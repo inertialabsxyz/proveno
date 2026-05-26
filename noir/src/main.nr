@@ -66,6 +66,7 @@ fn main(
     cert_public_key_y: [[u8; 32]; MAX_CERTS],
     cert_signatures: [[u8; 64]; MAX_CERTS],
     cert_msg_hashes: [[u8; 32]; MAX_CERTS],
+    num_certs: u32,
 ) {
     assert_bytecode(
         bytecode_opcodes,
@@ -166,32 +167,28 @@ fn main(
     let computed = Poseidon2::hash(leaves, num_tool_calls);
     assert(computed == be_bytes32_to_field(tool_responses_hash));
 
-    // // 7. TLS attestation verification.
-    // //    For each cert i < num_certs: verify P-256 ECDSA signature.
-    // //    Accumulate a SHA-256 over the cert public keys (x || y per cert) in order,
-    // //    then assert the result equals tls_attestation_hash.
-    // //    When num_certs == 0, assert tls_attestation_hash is the zero array.
-    // let mut tls_flat: [u8; 256] = [0; 256]; // MAX_CERTS * 64
-    // for i in 0..MAX_CERTS {
-    //     if (i as u32) < num_certs {
-    //         assert(std::ecdsa_secp256r1::verify_signature(
-    //             cert_public_key_x[i],
-    //             cert_public_key_y[i],
-    //             cert_signatures[i],
-    //             cert_msg_hashes[i],
-    //         ));
-    //         for j in 0..32 {
-    //             tls_flat[i * 64 + j] = cert_public_key_x[i][j];
-    //             tls_flat[i * 64 + 32 + j] = cert_public_key_y[i][j];
-    //         }
-    //     }
-    // }
-    // if num_certs == 0 {
-    //     for j in 0..32 {
-    //         assert(tls_attestation_hash[j] == 0);
-    //     }
-    // } else {
-    //     let computed_tls_hash = sha256_var(tls_flat, (num_certs * 64) as u64);
-    //     assert(computed_tls_hash == tls_attestation_hash);
-    // }
+    // 7. TLS attestation verification.
+    //    For each cert i < num_certs: verify P-256 ECDSA signature, then
+    //    accumulate the cert public-key bytes (x || y) into a Poseidon2 input
+    //    vector, one byte per Field, matching the oracle-tape commitment
+    //    convention. The hash count is `num_certs * 64`, so padded slots
+    //    contribute no live input. The empty-cert case naturally produces
+    //    `Poseidon2::hash([], 0)` (no special branch needed).
+    let mut tls_fields: [Field; 256] = [0; 256]; // MAX_CERTS * 64
+    for i in 0..MAX_CERTS {
+        if (i as u32) < num_certs {
+            assert(std::ecdsa_secp256r1::verify_signature(
+                cert_public_key_x[i],
+                cert_public_key_y[i],
+                cert_signatures[i],
+                cert_msg_hashes[i],
+            ));
+            for j in 0..32 {
+                tls_fields[i * 64 + j] = cert_public_key_x[i][j] as Field;
+                tls_fields[i * 64 + 32 + j] = cert_public_key_y[i][j] as Field;
+            }
+        }
+    }
+    let computed_tls_hash = Poseidon2::hash(tls_fields, num_certs * 64);
+    assert(computed_tls_hash == be_bytes32_to_field(tls_attestation_hash));
 }

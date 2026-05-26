@@ -10,6 +10,16 @@ cargo test
 
 Must pass before every commit. Run across all workspace members by default.
 
+### Pre-PR gate
+
+Before opening a PR, also run:
+
+```bash
+make test-prove
+```
+
+This drives the full nargo+bb prove/verify pipeline via `luai-noir/tests/prove.rs` (which is **not** picked up by plain `cargo test` from the root). It prints prove/verify wall-time per test so circuit-size / prove-time regressions are visible. Slow (~20 s) and requires `nargo` and `bb` on `PATH`.
+
 ## Common Commands
 
 ```bash

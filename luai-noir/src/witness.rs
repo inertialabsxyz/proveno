@@ -11,7 +11,7 @@ use luai::{OracleTape, TapeEntry};
 
 pub const MAX_BYTECODE: usize = 512;
 pub const MAX_STEPS: usize = 2048;
-pub const MAX_TOOL_CALLS: usize = 64;
+pub const MAX_TOOL_CALLS: usize = 16;
 pub const MAX_TAPE_ENTRY_BYTES: usize = 1024;
 pub const MAX_CERTS: usize = 4;
 

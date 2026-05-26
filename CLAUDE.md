@@ -10,6 +10,16 @@ cargo test
 
 Must pass before every commit. Run across all workspace members by default.
 
+### Pre-PR gate
+
+Before opening a PR, also run:
+
+```bash
+make test-prove
+```
+
+This drives the full nargo+bb prove/verify pipeline via `luai-noir/tests/prove.rs` (which is **not** picked up by plain `cargo test` from the root). It prints prove/verify wall-time per test so circuit-size / prove-time regressions are visible. Slow (~20 s) and requires `nargo` and `bb` on `PATH`.
+
 ## Common Commands
 
 ```bash
@@ -31,6 +41,10 @@ cargo test --features "serde zkvm"   # test with serde + zkvm features
 cargo run -p luai-compiler -- source.lua compiled.json
 cargo run -p luai-prover   -- compiled.json dry_result.json
 cargo run -p luai-orchestrator -- "natural language task"
+
+# Noir prove/verify benchmark (drives the full nargo+bb pipeline; prints prove/verify wall time)
+# Requires `nargo` and `bb` on PATH.
+cargo test -p luai-noir --test prove end_to_end_prove_and_verify -- --nocapture
 ```
 
 There is no separate lint command; `cargo test` exercises the full suite including doc-tests. `cargo clippy` is not currently part of the gate.

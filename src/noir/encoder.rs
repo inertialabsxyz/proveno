@@ -1,6 +1,7 @@
-use sha2::{Digest, Sha256};
-
-use crate::compiler::proto::CompiledProgram;
+use crate::{
+    compiler::proto::CompiledProgram,
+    host::poseidon2::{field_to_be_bytes32, i64_to_field, poseidon2_hash, u8_to_field},
+};
 
 use super::opcodes::{instruction_to_opcode_id, instruction_to_operand};
 
@@ -42,14 +43,16 @@ pub fn encode_program(program: &CompiledProgram) -> Result<NoirBytecode, EncodeE
         }
     }
 
-    // SHA-256 over (opcode_byte || operand_le_8bytes) for live instructions only.
-    // Matches the circuit: sha256_var(hash_input, instr_count * 9).
-    let mut hasher = Sha256::new();
+    // Poseidon2 over interleaved (opcode_field, operand_field) for live
+    // instructions only. Matches the circuit: Poseidon2::hash(inputs[2*instr_count]).
+    // i64 operands are widened to u64 via the bit pattern (so -1 → u64::MAX),
+    // mirroring how the Noir side coerces signed operands into Field.
+    let mut inputs = Vec::with_capacity(count * 2);
     for i in 0..count {
-        hasher.update([opcodes[i]]);
-        hasher.update(operands[i].to_le_bytes());
+        inputs.push(u8_to_field(opcodes[i]));
+        inputs.push(i64_to_field(operands[i]));
     }
-    let program_hash: [u8; 32] = hasher.finalize().into();
+    let program_hash = field_to_be_bytes32(poseidon2_hash(&inputs));
 
     Ok(NoirBytecode {
         opcodes,

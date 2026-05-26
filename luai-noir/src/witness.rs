@@ -216,8 +216,9 @@ pub fn write_prover_toml(witness: &NoirWitness, path: &Path) -> io::Result<()> {
         rows_toml(witness.tape_entry_data.iter().map(|r| r.as_slice()))
     ));
 
-    // TLS witnesses.
-    out.push_str(&format!("num_certs = {}\n", witness.num_certs));
+    // TLS witnesses. `num_certs` is intentionally not emitted: the circuit's
+    // `main` does not currently take a cert-count parameter, so writing one
+    // would cause nargo to reject the Prover.toml as an unexpected argument.
     out.push_str(&format!(
         "cert_public_key_x = [{}]\n",
         rows_toml(witness.cert_public_key_x.iter().map(|r| r.as_slice()))
@@ -379,7 +380,7 @@ mod tests {
         assert!(contents.contains("output_hash = ["));
         assert!(contents.contains("tls_attestation_hash = ["));
         assert!(contents.contains("policy_hash = ["));
-        assert!(contents.contains("num_certs ="));
+        assert!(!contents.contains("num_certs ="));
         assert!(contents.contains("cert_public_key_x = ["));
         assert!(contents.contains("cert_signatures = ["));
     }
@@ -400,13 +401,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(witness.num_tool_calls, 0);
-        // SHA-256 of empty input
-        let expected_hash: [u8; 32] = [
-            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
-            0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
-            0x78, 0x52, 0xb8, 0x55,
-        ];
-        assert_eq!(witness.tool_responses_hash, expected_hash);
+        // Empty-tape commitment is the Poseidon2 sponge digest of zero leaves;
+        // assert parity with the tape implementation rather than pinning bytes.
+        assert_eq!(
+            witness.tool_responses_hash,
+            OracleTape::new().commitment_hash()
+        );
     }
 
     #[test]

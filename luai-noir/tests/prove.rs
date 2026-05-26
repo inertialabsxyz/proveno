@@ -8,6 +8,16 @@ mod nargo_tests {
     use luai_noir::prover::NoirProver;
     use luai_noir::witness::build_witness;
     use std::path::PathBuf;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    /// Every test in this module shares `noir/Prover.toml` and the `noir/target/`
+    /// nargo+bb artifact directory. Serialise so parallel runners don't stomp.
+    fn prover_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
 
     fn circuit_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../noir")
@@ -57,6 +67,7 @@ mod nargo_tests {
 
     #[test]
     fn end_to_end_prove_and_verify() {
+        let _lock = prover_lock();
         let (bytecode, output) = run_lua("return 1 + 2");
         let ret = return_i64(&output.return_value);
         let tape = OracleTape::from_records(&output.transcript);
@@ -83,6 +94,7 @@ mod nargo_tests {
 
     #[test]
     fn tampered_return_value_fails_verify() {
+        let _lock = prover_lock();
         let (bytecode, output) = run_lua("return 1 + 2");
         let ret = return_i64(&output.return_value);
         let tape = OracleTape::from_records(&output.transcript);
@@ -115,6 +127,7 @@ mod nargo_tests {
 
     #[test]
     fn multi_function_proves_correctly() {
+        let _lock = prover_lock();
         let src = "local function add(a, b) return a + b end; return add(10, 32)";
         let (bytecode, output) = run_lua(src);
         let ret = return_i64(&output.return_value);
@@ -142,6 +155,7 @@ mod nargo_tests {
 
     #[test]
     fn prove_with_tool_calls() {
+        let _lock = prover_lock();
         // Program makes one tool call; the oracle tape carries the response.
         let src = "tool.call(\"kv_get\", {key = \"x\"}); return 1";
         let (bytecode, output) = run_lua_with_host(src, FixedResponseHost);
@@ -176,6 +190,7 @@ mod nargo_tests {
 
     #[test]
     fn tampered_tape_entry_fails_verify() {
+        let _lock = prover_lock();
         let src = "tool.call(\"kv_get\", {key = \"x\"}); return 1";
         let (bytecode, output) = run_lua_with_host(src, FixedResponseHost);
         let ret = return_i64(&output.return_value);
@@ -210,12 +225,10 @@ mod nargo_tests {
 
     #[test]
     fn no_tool_calls_zero_hash() {
-        // SHA-256 of empty input (no tool calls → commitment_hash over empty sequence).
-        let sha256_empty: [u8; 32] = [
-            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
-            0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
-            0x78, 0x52, 0xb8, 0x55,
-        ];
+        let _lock = prover_lock();
+        // With no tool calls the commitment is Poseidon2 over zero leaves;
+        // assert parity with the tape implementation rather than pinning bytes.
+        let empty_hash = OracleTape::new().commitment_hash();
         let (bytecode, output) = run_lua("return 7");
         let ret = return_i64(&output.return_value);
         let tape = OracleTape::from_records(&output.transcript);
@@ -232,13 +245,13 @@ mod nargo_tests {
         )
         .unwrap();
         assert_eq!(witness.num_tool_calls, 0);
-        assert_eq!(witness.tool_responses_hash, sha256_empty);
+        assert_eq!(witness.tool_responses_hash, empty_hash);
         let prover = NoirProver {
             circuit_dir: circuit_dir(),
         };
         let proof = prover.prove(&witness).expect("prove failed");
         let verified = prover.verify(&proof).expect("verify failed");
         assert!(verified, "no-tool-call proof should verify");
-        assert_eq!(proof.public_inputs.tool_responses_hash, sha256_empty);
+        assert_eq!(proof.public_inputs.tool_responses_hash, empty_hash);
     }
 }

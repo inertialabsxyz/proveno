@@ -1,25 +1,44 @@
+use poseidon::poseidon2::Poseidon2;
+
 global MAX_BYTECODE: u32 = 512;
 global MAX_STEPS: u32 = 2048;
 global MAX_TOOL_CALLS: u32 = 64;
 global MAX_TAPE_ENTRY_BYTES: u32 = 1024;
-// 64 entries * (1 tag + 4 length bytes + 1024 payload bytes) = 65856
+// Per-instruction Poseidon2 input pair: opcode field || operand field.
+global MAX_BYTECODE_FIELDS: u32 = MAX_BYTECODE * 2;
+// Per-entry Poseidon2 input vector: tag || len || payload bytes (one Field each).
+global MAX_TAPE_ENTRY_FIELDS: u32 = MAX_TAPE_ENTRY_BYTES + 2;
 global MAX_CERTS: u32 = 4;
 
-use sha256::sha256_var;
+// Decode a 32-byte big-endian array into a single Field. Mirrors
+// `field_to_be_bytes32` on the Rust side, used to bridge the [u8; 32]
+// public-input wire shape into the Field domain Poseidon2 operates in.
+fn be_bytes32_to_field(bytes: [u8; 32]) -> Field {
+    let mut acc: Field = 0;
+    for i in 0..32 {
+        acc = acc * 256 + bytes[i] as Field;
+    }
+    acc
+}
 
-// Decomposes an i64 operand into 8 little-endian bytes using arithmetic right
-// shift. Negative values are handled correctly via two's complement bit masking.
-fn operand_le_bytes(val: i64) -> [u8; 8] {
-    [
-        (val & 0xFF) as u8,
-        ((val >> 8) & 0xFF) as u8,
-        ((val >> 16) & 0xFF) as u8,
-        ((val >> 24) & 0xFF) as u8,
-        ((val >> 32) & 0xFF) as u8,
-        ((val >> 40) & 0xFF) as u8,
-        ((val >> 48) & 0xFF) as u8,
-        ((val >> 56) & 0xFF) as u8,
-    ]
+fn assert_bytecode(
+    bytecode_opcodes: [u8; MAX_BYTECODE],
+    bytecode_operands: [i64; MAX_BYTECODE],
+    instr_count: u32,
+    program_hash: [u8; 32],
+) {
+    // Build [opcode_0, operand_0, opcode_1, operand_1, ...] over the full
+    // MAX_BYTECODE buffer; live slots populate the first 2*instr_count fields,
+    // padding stays zero. Negative i64 operands are reinterpreted as u64 to
+    // match the Rust encoder's `(val as u64) as Field` widening.
+    let mut hash_input: [Field; MAX_BYTECODE_FIELDS] = [0; MAX_BYTECODE_FIELDS];
+    for i in 0..MAX_BYTECODE {
+        hash_input[i * 2] = bytecode_opcodes[i] as Field;
+        hash_input[i * 2 + 1] = (bytecode_operands[i] as u64) as Field;
+    }
+
+    let computed = Poseidon2::hash(hash_input, instr_count * 2);
+    assert(computed == be_bytes32_to_field(program_hash));
 }
 
 fn main(
@@ -47,42 +66,18 @@ fn main(
     cert_public_key_y: [[u8; 32]; MAX_CERTS],
     cert_signatures: [[u8; 64]; MAX_CERTS],
     cert_msg_hashes: [[u8; 32]; MAX_CERTS],
-    num_certs: u32,
 ) {
-    // 1. Verify program hash: SHA-256 over (opcode || operand LE) for live instructions only.
-    //    Uses sha256_var with instr_count * 9 bytes so padding slots are not hashed.
-    let mut hash_input: [u8; 4608] = [0; 4608]; // MAX_BYTECODE * 9
-    for i in 0..MAX_BYTECODE {
-        hash_input[i * 9] = bytecode_opcodes[i];
-        let op_bytes: [u8; 8] = operand_le_bytes(bytecode_operands[i]);
-        for j in 0..8 {
-            hash_input[i * 9 + 1 + j] = op_bytes[j];
-        }
-    }
-    assert(sha256_var(hash_input, (instr_count * 9) as u64) == program_hash);
-
-    // 1 (original). Hash all MAX_BYTECODE slots including padding - kept for reference.
-    // let mut hash_input: [u8; 4608] = [0; 4608]; // MAX_BYTECODE * 9
-    // for i in 0..MAX_BYTECODE {
-    //     hash_input[i * 9] = bytecode_opcodes[i];
-    //     let op_bytes: [u8; 8] = operand_le_bytes(bytecode_operands[i]);
-    //     for j in 0..8 {
-    //         hash_input[i * 9 + 1 + j] = op_bytes[j];
-    //     }
-    // }
-    // assert(digest(hash_input) == program_hash);
-
-    // 2. First step must start at pc=0.
+    assert_bytecode(
+        bytecode_opcodes,
+        bytecode_operands,
+        instr_count,
+        program_hash,
+    );
     assert(trace_pcs[0] == 0);
 
-    // 3-6. Single pass over the trace: verify each step, check continuity,
-    //      assert the return value, and accumulate the oracle tape commitment.
-    //      Framing matches OracleTape::commitment_hash():
-    //        for each ToolCall entry: tag (1 byte) || length (4 bytes LE) || payload
-    let mut flat: [u8; 65856] = [0; 65856]; // MAX_TOOL_CALLS * (1 + 4 + MAX_TAPE_ENTRY_BYTES)
-    let mut byte_cursor: u32 = 0;
-    let mut tape_cursor: u32 = 0;
-
+    // 3-5. Single pass: verify each step's bytecode consistency, PC continuity,
+    //      and return value. Count ToolCall opcodes to match against num_tool_calls.
+    let mut tool_call_count: u32 = 0;
     for i in 0..MAX_STEPS {
         if (i as u32) < num_steps {
             let pc = trace_pcs[i];
@@ -96,31 +91,23 @@ fn main(
             assert(operand == bytecode_operands[pc]);
             assert(opcode <= 45);
 
-            // 3b. Compute expected next_pc. Jump target = pc + 1 + operand (signed offset).
+            // 3b. Compute expected next_pc.
             let jmp_target = (pc as i64 + 1 + operand) as u32;
             let expected_next_pc = if opcode == 33 {
-                // Jmp(33): always jump
                 jmp_target
             } else if (opcode == 34) & (stack_top != 0) {
-                // JmpIf(34): jump when non-zero
                 jmp_target
             } else if (opcode == 35) & (stack_top == 0) {
-                // JmpIfNot(35): jump when zero
                 jmp_target
             } else if (opcode == 29) & (stack_top == 0) {
-                // And(29): short-circuit jump when zero
                 jmp_target
             } else if (opcode == 30) & (stack_top != 0) {
-                // Or(30): short-circuit jump when non-zero
                 jmp_target
             } else if (opcode == 43) & (stack_top == 0) {
-                // IterInitSorted(43): jump when empty
                 jmp_target
             } else if (opcode == 44) & (stack_top == 0) {
-                // IterInitArray(44): jump when empty
                 jmp_target
             } else if (opcode == 45) & (stack_top == 0) {
-                // IterNext(45): jump when exhausted
                 jmp_target
             } else {
                 pc + 1
@@ -133,46 +120,51 @@ fn main(
                 assert(next_pc == expected_next_pc);
             }
 
-            // 4. Step continuity: next step's pc must equal this step's next_pc.
+            // 4. Step continuity.
             if (i as u32) + 1 < num_steps {
                 assert(trace_pcs[i + 1] == trace_next_pcs[i]);
             }
 
-            // // 5. Return value: stack_top at Ret(37) must equal the committed return_value.
-            // if opcode == 37 {
-            //     assert(stack_top == return_value);
-            // }
+            // 5. Return value: only the final step's Ret returns the program-level
+            //    value. Inner Rets unwind nested call frames with their own
+            //    intermediate values and must not be constrained here.
+            if ((i as u32) + 1 == num_steps) & (opcode == 37) {
+                assert(stack_top == return_value);
+            }
 
-            // // 6. Oracle tape: consume next entry on ToolCall(39).
-            // if opcode == 39 {
-            //     let tag = tape_entry_tags[tape_cursor];
-            //     let len = tape_entry_lengths[tape_cursor];
-            //     let data = tape_entry_data[tape_cursor];
-
-            //     flat[byte_cursor] = tag;
-            //     byte_cursor += 1;
-
-            //     flat[byte_cursor] = (len & 0xFF) as u8;
-            //     flat[byte_cursor + 1] = ((len >> 8) & 0xFF) as u8;
-            //     flat[byte_cursor + 2] = ((len >> 16) & 0xFF) as u8;
-            //     flat[byte_cursor + 3] = ((len >> 24) & 0xFF) as u8;
-            //     byte_cursor += 4;
-
-            //     for j in 0..MAX_TAPE_ENTRY_BYTES {
-            //         if j < len {
-            //             flat[byte_cursor] = data[j];
-            //             byte_cursor += 1;
-            //         }
-            //     }
-
-            //     tape_cursor += 1;
-            // }
+            // 6. Count tool calls.
+            if opcode == 39 {
+                tool_call_count += 1;
+            }
         }
     }
 
-    // assert(tape_cursor == num_tool_calls);
-    // let computed_hash = sha256_var(flat, byte_cursor as u64);
-    // assert(computed_hash == tool_responses_hash);
+    // 7. Oracle tape: assert tool call count matches, then verify the tape hash
+    //    using a two-level Poseidon2 scheme that matches `OracleTape::commitment_hash`:
+    //
+    //        leaf_i      = Poseidon2( tag, len, payload_byte_0, ..., payload_byte_{m-1} )
+    //        commitment  = Poseidon2( leaf_0, leaf_1, ..., leaf_{n-1} )
+    //
+    //    Each per-entry input vector is laid out in a fixed-shape
+    //    `[Field; MAX_TAPE_ENTRY_FIELDS]` buffer; only the first `len + 2`
+    //    elements are part of the hash (via `Poseidon2::hash`'s `message_size`).
+    //    Unused entry slots produce a leaf over a zero-padded buffer with
+    //    `len + 2 = 2`, but the resulting leaf is overwritten in `leaves`
+    //    only for live slots, so it can't leak into the outer commitment.
+    assert(tool_call_count == num_tool_calls);
+    let mut leaves: [Field; MAX_TOOL_CALLS] = [0; MAX_TOOL_CALLS];
+    for i in 0..MAX_TOOL_CALLS {
+        let len = tape_entry_lengths[i];
+        let mut entry_fields: [Field; MAX_TAPE_ENTRY_FIELDS] = [0; MAX_TAPE_ENTRY_FIELDS];
+        entry_fields[0] = tape_entry_tags[i] as Field;
+        entry_fields[1] = len as Field;
+        for j in 0..MAX_TAPE_ENTRY_BYTES {
+            entry_fields[2 + j] = tape_entry_data[i][j] as Field;
+        }
+        leaves[i] = Poseidon2::hash(entry_fields, len + 2);
+    }
+    let computed = Poseidon2::hash(leaves, num_tool_calls);
+    assert(computed == be_bytes32_to_field(tool_responses_hash));
 
     // // 7. TLS attestation verification.
     // //    For each cert i < num_certs: verify P-256 ECDSA signature.

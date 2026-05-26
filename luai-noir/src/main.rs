@@ -1,10 +1,7 @@
 use std::{env, fs, path::PathBuf};
 
-use luai::{
-    OracleTape, TapeHost, Vm, VmConfig, compiler::CompiledProgram, noir::encoder::encode_program,
-    types::value::LuaValue,
-};
-use luai_noir::{NoirProver, build_witness, write_prover_toml};
+use luai::compiler::CompiledProgram;
+use luai_noir::{ProveOptions, prove_from_artifacts};
 use luai_prover::prover::DryRunResult;
 
 fn main() {
@@ -62,77 +59,80 @@ fn main() {
         std::process::exit(1);
     });
 
-    let bytecode = encode_program(&compiled_program).unwrap_or_else(|e| {
-        eprintln!("encode error: {e:?}");
-        std::process::exit(1);
-    });
-
-    // Extract fields before consuming dry_run_result.
-    let policy_hash = dry_run_result.public_inputs.policy_hash;
-    let tls_attestations = dry_run_result.tls_attestations;
-
-    // Re-execute against the oracle tape to record the instruction trace.
-    let config = VmConfig {
-        record_trace: true,
-        ..VmConfig::default()
-    };
-    let output = Vm::new(config, TapeHost::new(dry_run_result.oracle_tape))
-        .execute(&compiled_program, LuaValue::Nil)
-        .unwrap_or_else(|e| {
-            eprintln!("execution error: {e:?}");
-            std::process::exit(1);
-        });
-
-    let return_val = match &output.return_value {
-        LuaValue::Integer(n) => *n,
-        _ => 0,
-    };
-    let replay_tape = OracleTape::from_records(&output.transcript);
-
-    let witness = build_witness(
-        &bytecode,
-        &output.trace,
-        return_val,
-        &replay_tape,
-        &LuaValue::Nil,
-        &output,
-        &tls_attestations,
-        policy_hash,
-    )
-    .unwrap_or_else(|e| {
-        eprintln!("witness error: {e}");
-        std::process::exit(1);
-    });
-
-    let prover_toml = circuit_dir.join("Prover.toml");
-    write_prover_toml(&witness, &prover_toml).unwrap_or_else(|e| {
-        eprintln!("error writing Prover.toml: {e}");
-        std::process::exit(1);
-    });
-    println!("Prover.toml written → {}", prover_toml.display());
-
-    if do_prove {
-        let prover = NoirProver {
-            circuit_dir: circuit_dir.clone(),
+    if !do_prove {
+        // Replicate prior behaviour: write Prover.toml only, no proving.
+        use luai::{
+            OracleTape, TapeHost, Vm, VmConfig, noir::encoder::encode_program,
+            types::value::LuaValue,
         };
-        let proof = prover.prove(&witness).unwrap_or_else(|e| {
-            eprintln!("prove error: {e}");
+        use luai_noir::{build_witness, write_prover_toml};
+
+        let bytecode = encode_program(&compiled_program).unwrap_or_else(|e| {
+            eprintln!("encode error: {e:?}");
             std::process::exit(1);
         });
-        println!(
-            "Proof generated in {:.1}s ({} bytes)",
-            proof.prove_duration.as_secs_f64(),
-            proof.proof_bytes.len()
-        );
-        let valid = prover.verify(&proof).unwrap_or_else(|e| {
-            eprintln!("verify error: {e}");
+        let policy_hash = dry_run_result.public_inputs.policy_hash;
+        let tls_attestations = dry_run_result.tls_attestations;
+        let config = VmConfig {
+            record_trace: true,
+            ..VmConfig::default()
+        };
+        let output = Vm::new(config, TapeHost::new(dry_run_result.oracle_tape))
+            .execute(&compiled_program, LuaValue::Nil)
+            .unwrap_or_else(|e| {
+                eprintln!("execution error: {e:?}");
+                std::process::exit(1);
+            });
+        let return_val = match &output.return_value {
+            LuaValue::Integer(n) => *n,
+            _ => 0,
+        };
+        let replay_tape = OracleTape::from_records(&output.transcript);
+        let witness = build_witness(
+            &bytecode,
+            &output.trace,
+            return_val,
+            &replay_tape,
+            &LuaValue::Nil,
+            &output,
+            &tls_attestations,
+            policy_hash,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("witness error: {e}");
             std::process::exit(1);
         });
-        if valid {
-            println!("Proof verified.");
-        } else {
-            eprintln!("Proof verification failed.");
+        let prover_toml = circuit_dir.join("Prover.toml");
+        write_prover_toml(&witness, &prover_toml).unwrap_or_else(|e| {
+            eprintln!("error writing Prover.toml: {e}");
             std::process::exit(1);
-        }
+        });
+        println!("Prover.toml written → {}", prover_toml.display());
+        return;
+    }
+
+    let opts = ProveOptions {
+        circuit_dir: circuit_dir.clone(),
+        do_verify: true,
+    };
+    let result =
+        prove_from_artifacts(&compiled_program, &dry_run_result, &opts).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(1);
+        });
+    println!(
+        "Prover.toml written → {}",
+        circuit_dir.join("Prover.toml").display()
+    );
+    println!(
+        "Proof generated in {:.1}s ({} bytes)",
+        result.proof.prove_duration.as_secs_f64(),
+        result.proof.proof_bytes.len()
+    );
+    if result.verified {
+        println!("Proof verified.");
+    } else {
+        eprintln!("Proof verification failed.");
+        std::process::exit(1);
     }
 }

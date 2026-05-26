@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["compiler","openvm","orchestrator","prover","verifier","luai-noir"]
+members = ["compiler","orchestrator","prover","verifier","luai-noir"]
 resolver = "2"
 
 [features]

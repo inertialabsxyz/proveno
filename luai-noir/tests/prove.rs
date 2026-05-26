@@ -66,6 +66,15 @@ mod nargo_tests {
         }
     }
 
+    /// End-to-end smoke + benchmark for the Noir prove/verify pipeline.
+    ///
+    /// Run with `--nocapture` to surface prove and verify wall-time — useful
+    /// as a regression signal when tuning circuit bounds (`MAX_TOOL_CALLS`,
+    /// `MAX_STEPS`, etc.):
+    ///
+    /// ```text
+    /// cargo test -p luai-noir --test prove end_to_end_prove_and_verify -- --nocapture
+    /// ```
     #[test]
     fn end_to_end_prove_and_verify() {
         let _lock = prover_lock();

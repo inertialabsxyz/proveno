@@ -85,3 +85,15 @@ If you add or modify zkvm/serde-gated code, run the feature-flagged tests locall
 | Determinism (replay → identical hashes) | Integration; record then replay, assert hash equality | `tests/integration.rs` |
 | TLS attestation | Feature-gated integration | `tls_attestation_nonzero_for_p256`, `tls_degrades_cleanly_for_non_p256` |
 | ZK commitment / public inputs | Unit + feature-gated integration | `src/zkvm/commitment.rs`, `--features zkvm` |
+| Noir circuit + nargo+bb prove/verify pipeline | Integration in `luai-noir/tests/prove.rs` | `cargo test -p luai-noir --test prove` |
+
+## Noir prove/verify benchmark
+
+`luai-noir/tests/prove.rs::end_to_end_prove_and_verify` drives the full `nargo execute → bb write_vk → bb prove → bb verify` pipeline and prints wall-time for prove and verify when run with `--nocapture`. Use it as a smoke-level regression signal when tuning circuit bounds (`MAX_TOOL_CALLS`, `MAX_STEPS`, etc.):
+
+```bash
+cargo test -p luai-noir --test prove end_to_end_prove_and_verify -- --nocapture
+# end_to_end_prove_and_verify: prove=4.36s verify=0.02s
+```
+
+Requires `nargo` and `bb` on `PATH`.

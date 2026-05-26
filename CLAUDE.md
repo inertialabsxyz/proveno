@@ -31,6 +31,10 @@ cargo test --features "serde zkvm"   # test with serde + zkvm features
 cargo run -p luai-compiler -- source.lua compiled.json
 cargo run -p luai-prover   -- compiled.json dry_result.json
 cargo run -p luai-orchestrator -- "natural language task"
+
+# Noir prove/verify benchmark (drives the full nargo+bb pipeline; prints prove/verify wall time)
+# Requires `nargo` and `bb` on PATH.
+cargo test -p luai-noir --test prove end_to_end_prove_and_verify -- --nocapture
 ```
 
 There is no separate lint command; `cargo test` exercises the full suite including doc-tests. `cargo clippy` is not currently part of the gate.

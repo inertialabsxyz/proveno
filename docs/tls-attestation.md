@@ -17,24 +17,30 @@ satisfies all of the following conditions:
    (`*.example.com`) are matched against a single label. CN fallback is not
    supported; a SAN extension is required.
 
-...then `tls_attestation_hash` in the resulting `PublicInputs` is non-zero and
-equals:
+...then `tls_attestation_hash` in the resulting `PublicInputs` commits to the
+P-256 public-key halves of every cert in chain order, via Poseidon2 over BN254:
 
 ```
-SHA-256 over:
-  for each verified record (in tool-call order):
-    u32_le(hostname length in bytes)
-    hostname bytes (UTF-8)
-    u64_le(cert_not_after, Unix seconds, from leaf cert validity field)
-    u32_le(number of certs in chain)
-    for each cert:
-      u32_le(cert DER length)
-      cert DER bytes
+Poseidon2::hash(fields, num_fields)
+  where fields =
+    for each verified record (in tool-call order):
+      for each cert in chain order:
+        for each byte b in pubkey_x[0..32]: u8_to_field(b)
+        for each byte b in pubkey_y[0..32]: u8_to_field(b)
 ```
 
-This hash is committed by the zkVM guest (OpenVM) as one of its public outputs.
-An on-chain verifier can use it to bind the proof to a specific server identity
-and inspect when the leaf certificate expires.
+The result is a BN254 field element, serialised to `[u8; 32]` big-endian. This
+matches the Noir circuit's `Poseidon2::hash(tls_fields, num_certs * 64)` byte
+for byte; both sides commit to the same content.
+
+Hostname and `cert_not_after` are **not** part of the commitment. The Noir
+circuit does not verify them, so binding them in the Rust-side hash would
+create a Rust↔circuit mismatch on the proof-relevant content. If a future
+phase needs to bind those, do it via a separate public input.
+
+This hash is committed by the zkVM guest as one of its public outputs. An
+on-chain verifier can use it to bind the proof to a specific server pubkey
+(and through that, to the cert chain rooted in a Mozilla trust anchor).
 
 ### What the hash does NOT prove
 
@@ -53,13 +59,16 @@ and inspect when the leaf certificate expires.
 
 | Configuration | `tls_attestation_hash` |
 |---|---|
-| HTTPS, leaf cert uses P-256, chain roots in Mozilla set, hostname matches SAN | Non-zero |
-| HTTPS, leaf cert uses RSA or Ed25519 | Zero (degraded) |
-| HTTPS, root cert not in Mozilla set | Zero (degraded) |
-| HTTPS, hostname does not match leaf cert SANs | Zero (degraded) |
-| HTTPS, leaf cert has no SAN extension | Zero (degraded) |
-| Plain HTTP (no TLS) | Zero (degraded) |
-| TLS handshake error / network failure | Zero (degraded) |
+| HTTPS, leaf cert uses P-256, chain roots in Mozilla set, hostname matches SAN | Commitment to pubkey halves |
+| HTTPS, leaf cert uses RSA or Ed25519 | Empty sentinel (degraded) |
+| HTTPS, root cert not in Mozilla set | Empty sentinel (degraded) |
+| HTTPS, hostname does not match leaf cert SANs | Empty sentinel (degraded) |
+| HTTPS, leaf cert has no SAN extension | Empty sentinel (degraded) |
+| Plain HTTP (no TLS) | Empty sentinel (degraded) |
+| TLS handshake error / network failure | Empty sentinel (degraded) |
+
+The "empty sentinel" is `Poseidon2::hash([], 0)` serialised to `[u8; 32]` BE,
+exposed as `tls::empty_tls_attestation_hash()`. It is **not** `[0u8; 32]`.
 
 ## Degradation
 
@@ -69,13 +78,14 @@ the leaf cert's SANs, or the connection is plain HTTP — the system degrades
 cleanly:
 
 - Execution completes normally; no panic, no malformed proof.
-- `tls_attestation_hash` is set to `[0u8; 32]`.
+- `tls_attestation_hash` equals `tls::empty_tls_attestation_hash()` (the
+  canonical `Poseidon2::hash([], 0)` digest).
 - A `TlsAttestationRecord::unavailable()` is recorded in the transcript so the
   verifier knows a tool call was made without provable TLS identity.
 
 The degraded state is a valid proof; it simply does not commit to any server
 identity. Protocols that require TLS attestation must explicitly reject proofs
-where `tls_attestation_hash == [0; 32]`.
+whose `tls_attestation_hash` matches `empty_tls_attestation_hash()`.
 
 ## P-256 verification and hostname binding in the zkVM guest
 

@@ -5,7 +5,10 @@ use luai::{
     bytecode::verify,
     compiler::compile,
     parser::parse,
-    tls::{TlsAttestationRecord, compute_tls_attestation_hash, verify::reverify_attestations},
+    tls::{
+        TlsAttestationRecord, compute_tls_attestation_hash, empty_tls_attestation_hash,
+        verify::reverify_attestations,
+    },
     types::{
         table::{LuaKey, LuaTable},
         value::{LuaString, LuaValue},
@@ -725,8 +728,10 @@ fn error_code_call_depth_exceeded_is_recoverable() {
 // ── TLS attestation ───────────────────────────────────────────────────────────
 //
 // These tests verify the TLS attestation pipeline:
-//   - P-256 HTTPS connections produce a non-zero tls_attestation_hash
-//   - Non-HTTPS (or non-P256) connections degrade cleanly: tls_attestation_hash == [0u8;32]
+//   - P-256 HTTPS connections produce a tls_attestation_hash committing to
+//     real pubkey content (≠ the empty-attestation sentinel)
+//   - Non-HTTPS (or non-P256) connections degrade cleanly: the hash equals
+//     `empty_tls_attestation_hash()` (canonical `Poseidon2::hash([], 0)`)
 //
 // `tls_attestation_nonzero_for_p256` makes a real network call to example.com.
 // `tls_degrades_cleanly_for_non_p256` uses a stub host — no network required.
@@ -1056,11 +1061,14 @@ fn tls_attestation_nonzero_for_p256() {
         "cert_not_after must be non-zero for a real cert"
     );
 
-    // Verify via `compute_tls_attestation_hash` directly.
+    // Verify via `compute_tls_attestation_hash` directly. A real cert chain
+    // commits to actual pubkey bytes, so the hash must differ from the empty
+    // sentinel (which is what an unverified/missing attestation produces).
     let hash = compute_tls_attestation_hash(&records);
     assert_ne!(
-        hash, [0u8; 32],
-        "expected non-zero tls_attestation_hash for P-256 server (got records: {records:?})"
+        hash,
+        empty_tls_attestation_hash(),
+        "expected non-empty tls_attestation_hash for P-256 server (got records: {records:?})"
     );
 
     // Also verify end-to-end through `PublicInputs` (the full prove pipeline).
@@ -1078,15 +1086,17 @@ fn tls_attestation_nonzero_for_p256() {
             &records,
         );
         assert_ne!(
-            pi.tls_attestation_hash, [0u8; 32],
-            "PublicInputs.tls_attestation_hash must be non-zero for P-256 server"
+            pi.tls_attestation_hash,
+            empty_tls_attestation_hash(),
+            "PublicInputs.tls_attestation_hash must commit to real pubkey content for P-256 server"
         );
     }
 }
 
 /// Degradation: when no P-256 TLS attestation is available (non-HTTPS or
-/// non-P256 server), execution must complete without panic and yield a zero hash.
-/// Also verifies `PublicInputs.tls_attestation_hash == [0u8; 32]`.
+/// non-P256 server), execution must complete without panic and yield the
+/// canonical empty-attestation hash (`Poseidon2::hash([], 0)` serialised).
+/// Also verifies `PublicInputs.tls_attestation_hash` matches that sentinel.
 #[test]
 fn tls_degrades_cleanly_for_non_p256() {
     let src = r#"
@@ -1100,11 +1110,12 @@ fn tls_degrades_cleanly_for_non_p256() {
     };
     let (output, records) = run_with_host(src, host, attestations);
 
-    // All attestations are unavailable → hash must be zero.
+    // All attestations are unavailable → hash must equal the empty sentinel.
     let hash = compute_tls_attestation_hash(&records);
     assert_eq!(
-        hash, [0u8; 32],
-        "expected zero tls_attestation_hash when no P-256 attestation is available"
+        hash,
+        empty_tls_attestation_hash(),
+        "expected canonical empty tls_attestation_hash when no P-256 attestation is available"
     );
 
     // Also verify end-to-end through `PublicInputs`.
@@ -1122,8 +1133,9 @@ fn tls_degrades_cleanly_for_non_p256() {
             &records,
         );
         assert_eq!(
-            pi.tls_attestation_hash, [0u8; 32],
-            "PublicInputs.tls_attestation_hash must be zero when no P-256 attestation"
+            pi.tls_attestation_hash,
+            empty_tls_attestation_hash(),
+            "PublicInputs.tls_attestation_hash must equal the empty sentinel when no P-256 attestation"
         );
     }
 }

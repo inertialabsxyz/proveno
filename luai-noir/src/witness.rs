@@ -3,7 +3,7 @@ use std::path::Path;
 
 use luai::noir::encoder::NoirBytecode;
 use luai::noir::trace::TraceStep;
-use luai::tls::TlsAttestationRecord;
+use luai::tls::{TlsAttestationRecord, empty_tls_attestation_hash};
 use luai::types::value::LuaValue;
 use luai::vm::engine::VmOutput;
 use luai::zkvm::commitment::{hash_input, hash_output};
@@ -67,8 +67,10 @@ impl std::error::Error for WitnessError {}
 /// Returns a heap-allocated witness to avoid placing ~480 KB of fixed-size
 /// arrays on the test-thread stack (default 2 MB on macOS).
 ///
-/// `tls_attestation_hash` is `[0u8; 32]` and `num_certs` is 0 for all inputs;
-/// full TLS circuit witnesses are a future phase.
+/// `tls_attestation_hash` is `empty_tls_attestation_hash()` and `num_certs` is 0
+/// for all inputs; full TLS circuit witnesses (pubkey extraction from DER) are
+/// a future phase. The circuit's `Poseidon2::hash(tls_fields, num_certs * 64)`
+/// with `num_certs = 0` produces exactly that sentinel.
 pub fn build_witness(
     bytecode: &NoirBytecode,
     trace: &[TraceStep],
@@ -128,10 +130,12 @@ pub fn build_witness(
     w.num_tool_calls = oracle_tape.entries.len().min(MAX_TOOL_CALLS) as u32;
     w.tool_responses_hash = oracle_tape.commitment_hash();
 
-    // TLS: full P-256 cert witnesses are not yet wired up. The circuit takes
-    // the num_certs == 0 branch and asserts tls_attestation_hash == [0; 32].
+    // TLS: full P-256 cert witnesses are not yet wired up. The circuit hashes
+    // zero cert bytes via Poseidon2 and asserts the result equals the public
+    // `tls_attestation_hash`, so the witness must use the canonical empty
+    // sentinel (NOT `[0u8; 32]`).
     w.num_certs = 0;
-    w.tls_attestation_hash = [0u8; 32];
+    w.tls_attestation_hash = empty_tls_attestation_hash();
 
     // Public input hashes.
     w.input_hash = hash_input(input_value);
@@ -317,7 +321,7 @@ mod tests {
         );
         assert_eq!(witness.num_tool_calls, 0);
         assert_eq!(witness.num_certs, 0);
-        assert_eq!(witness.tls_attestation_hash, [0u8; 32]);
+        assert_eq!(witness.tls_attestation_hash, empty_tls_attestation_hash());
         assert_eq!(witness.policy_hash, [0u8; 32]);
     }
 

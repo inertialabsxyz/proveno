@@ -643,6 +643,36 @@ pub fn extract_cert_not_after(cert_der: &[u8]) -> u64 {
     }
 }
 
+/// Extract the P-256 public-key x and y affine coordinates from a DER-encoded
+/// certificate. Returns `None` when the cert cannot be parsed, the SPKI is not
+/// P-256, or the SubjectPublicKey is not a 65-byte uncompressed SEC1 point.
+///
+/// The 32-byte halves are exactly the bytes the Noir circuit hashes for
+/// `tls_attestation_hash`; both sides commit to the same content.
+pub fn extract_p256_pubkey_xy(cert_der: &[u8]) -> Option<([u8; 32], [u8; 32])> {
+    use x509_cert::Certificate;
+    use x509_cert::der::Decode;
+
+    let cert = Certificate::from_der(cert_der).ok()?;
+    if !spki_is_p256(&cert) {
+        return None;
+    }
+    let key_bytes = cert
+        .tbs_certificate
+        .subject_public_key_info
+        .subject_public_key
+        .as_bytes()?;
+    // Uncompressed SEC1 encoding: 0x04 || x[32] || y[32]
+    if key_bytes.len() != 65 || key_bytes[0] != 0x04 {
+        return None;
+    }
+    let mut x = [0u8; 32];
+    let mut y = [0u8; 32];
+    x.copy_from_slice(&key_bytes[1..33]);
+    y.copy_from_slice(&key_bytes[33..65]);
+    Some((x, y))
+}
+
 /// Re-verify TLS attestation records, producing a clean set suitable for hashing.
 ///
 /// For each record, independently runs P-256 + Mozilla root + hostname checks

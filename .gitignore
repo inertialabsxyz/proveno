@@ -1,4 +1,5 @@
 /target
 .env
 *.bin
+!contracts/test/fixtures/*.bin
 contracts/broadcast/

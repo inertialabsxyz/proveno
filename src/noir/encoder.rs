@@ -95,9 +95,16 @@ mod tests {
 
     #[test]
     fn program_hash_is_stable() {
-        let program = compile_lua("return 1 + 2");
-        let enc1 = encode_program(&program).unwrap();
-        let enc2 = encode_program(&program).unwrap();
+        // Compile the same source twice (two independent `CompiledProgram`s)
+        // and assert both encodings produce identical program hashes. This
+        // exercises the determinism of `compute_program_hash` end-to-end —
+        // calling `encode_program` twice on the *same* `&program` would only
+        // copy the precomputed `program.program_hash` field and degenerate
+        // into `assert_eq!(x, x)`.
+        let p1 = compile_lua("return 1 + 2");
+        let p2 = compile_lua("return 1 + 2");
+        let enc1 = encode_program(&p1).unwrap();
+        let enc2 = encode_program(&p2).unwrap();
         assert_eq!(enc1.program_hash, enc2.program_hash);
     }
 

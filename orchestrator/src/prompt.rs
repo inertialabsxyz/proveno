@@ -91,7 +91,7 @@ const SYSTEM_PREAMBLE: &str = r#"You are a Lua program generator. You write Lua 
 - **Comments:** `--` single line
 
 ## Standard library
-- `string.len(s)`, `string.sub(s, i [, j])`, `string.find(s, pattern)`, `string.upper(s)`, `string.lower(s)`, `string.rep(s, n)`, `string.byte(s [, i])`, `string.char(...)`, `string.format(fmt, ...)`
+- `string.len(s)`, `string.sub(s, i [, j])`, `string.find(s, pattern [, init])`, `string.find_literal(s, needle [, init])`, `string.upper(s)`, `string.lower(s)`, `string.rep(s, n)`, `string.byte(s [, i])`, `string.char(...)`, `string.format(fmt, ...)`
 - `math.abs(x)`, `math.min(...)`, `math.max(...)`, `math.scale_div(num, denom, scale)`
 - `table.insert(t [, i], v)`, `table.remove(t [, i])`, `table.concat(t [, sep])`, `table.move(src, a, b, t)`, `table.sort(t [, comp])`
 - `json.encode(v)` — serialize to JSON string; `json.decode(s)` — parse JSON string
@@ -109,6 +109,19 @@ const SYSTEM_PREAMBLE: &str = r#"You are a Lua program generator. You write Lua 
 - No coroutines or metatables
 - All programs are single-shot: receive input, do work, return a result
 - The input is available as the first parameter to the top-level chunk
+
+## Numeric gotchas (read this!)
+- `tonumber("3245.67")` returns **`nil`**, not `3246`. The VM is integer-only, so any string containing a `.` fails to parse.
+- If `nil` ends up as a value in a returned table, JSON encoding silently drops the field — your run will look "successful" but be missing data. Always sanity-check:
+  `if value == nil then error("failed to parse price from " .. raw) end`
+- `string.find` rejects all Lua pattern metacharacters (`.`, `*`, `+`, `?`, `^`, `$`, `(`, `)`, `%`, `[`, `]`, `-`) even when you want them as literals. Use `string.find_literal(s, needle [, init])` whenever you need to search for one of these characters or any substring containing them.
+- For decimal API responses (prices, rates, percentages), parse them into integers at a fixed scale:
+    1. Get the raw string, e.g. `"3245.67"`.
+    2. Find the dot with `local dot = string.find_literal(raw, ".")`.
+    3. Take the integer and fractional parts with `string.sub(raw, 1, dot - 1)` and `string.sub(raw, dot + 1)`.
+    4. Pad or truncate the fractional part to a fixed scale (e.g. 8 digits for satoshi-style, or 2 for cents).
+    5. Concatenate and `tonumber` *that*. Document the scale in your returned value (e.g. `price_scale = 8`).
+- Prefer API endpoints that return integer-valued fields when one is available (e.g. a price already quoted in cents, or a Coingecko endpoint with `precision=0` for whole units).
 "#;
 
 const OUTPUT_INSTRUCTIONS: &str = r#"
@@ -204,6 +217,18 @@ mod tests {
         assert!(prompt.contains("## Important constraints"));
         assert!(prompt.contains("## Output format"));
         assert!(prompt.contains("Respond with ONLY the Lua program"));
+    }
+
+    #[test]
+    fn prompt_advertises_string_find_literal_and_numeric_gotchas() {
+        // These two are load-bearing for decimal-parsing tasks: without the
+        // gotchas section the LLM walks into the silent-nil `tonumber("x.y")`
+        // trap, and without `string.find_literal` it cannot recover by
+        // splitting on the dot. If either disappears, this test fails loudly.
+        let prompt = build_system_prompt(&[]);
+        assert!(prompt.contains("string.find_literal"));
+        assert!(prompt.contains("## Numeric gotchas"));
+        assert!(prompt.contains("integer-only"));
     }
 
     // ── ToolCatalogue tests ──────────────────────────────────────────

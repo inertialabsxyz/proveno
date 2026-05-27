@@ -88,7 +88,14 @@ pub fn build_witness(
     // Allocate zeroed witness on the heap. NoirWitness contains only integer
     // arrays (u8/u32/i64), for which zero-initialisation is always valid.
     // Safety: NoirWitness contains only integer arrays (u8/u32/i64); zero is valid for all of them.
-    let mut w: Box<NoirWitness> = unsafe { Box::<NoirWitness>::new_zeroed().assume_init() };
+    let mut w: Box<NoirWitness> = unsafe {
+        let layout = std::alloc::Layout::new::<NoirWitness>();
+        let ptr = std::alloc::alloc_zeroed(layout) as *mut NoirWitness;
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        Box::from_raw(ptr)
+    };
 
     // Bytecode.
     w.bytecode_opcodes = bytecode.opcodes;

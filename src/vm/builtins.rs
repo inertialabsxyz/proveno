@@ -59,6 +59,7 @@ pub fn call_builtin(
         BuiltinId::StringLen => string_len(args),
         BuiltinId::StringSub => string_sub(args, gas, mem),
         BuiltinId::StringFind => string_find(args, gas),
+        BuiltinId::StringFindLiteral => string_find_literal(args, gas),
         BuiltinId::StringUpper => string_upper(args, gas, mem),
         BuiltinId::StringLower => string_lower(args, gas, mem),
         BuiltinId::StringRep => string_rep(args, gas, mem),
@@ -364,31 +365,34 @@ fn check_no_pattern_metachar(pattern: &[u8]) -> Result<(), VmError> {
     Ok(())
 }
 
-fn string_find(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>, VmError> {
-    let s = require_string(args, 0, "string.find")?;
-    let pat = require_string(args, 1, "string.find")?;
-
-    let init: usize = if args.len() >= 3 {
-        let n = match &args[2] {
-            LuaValue::Integer(n) => *n,
-            other => {
-                return Err(VmError::TypeError(format!(
-                    "string.find: expected integer for init, got {}",
-                    other.type_name()
-                )));
-            }
-        };
-        if n < 1 { 0 } else { (n - 1) as usize }
-    } else {
-        0
+/// Resolve the optional `init` argument shared by `string.find` and
+/// `string.find_literal`: 1-based, clamped at 1, converted to a 0-based offset.
+fn parse_find_init(args: &[LuaValue], fn_name: &str) -> Result<usize, VmError> {
+    if args.len() < 3 {
+        return Ok(0);
+    }
+    let n = match &args[2] {
+        LuaValue::Integer(n) => *n,
+        other => {
+            return Err(VmError::TypeError(format!(
+                "{fn_name}: expected integer for init, got {}",
+                other.type_name()
+            )));
+        }
     };
+    Ok(if n < 1 { 0 } else { (n - 1) as usize })
+}
 
-    check_no_pattern_metachar(pat.as_bytes())?;
-
-    gas.charge(s.len() as u64)?;
-
-    let haystack = s.as_bytes();
-    let needle = pat.as_bytes();
+/// Literal byte-substring search shared by `string.find` (after its metachar
+/// check) and `string.find_literal` (which skips the check). Returns the
+/// 1-based inclusive [start, end] pair, or `(nil, nil)` if not found.
+fn literal_substring_search(
+    haystack: &[u8],
+    needle: &[u8],
+    init: usize,
+    gas: &mut GasMeter,
+) -> Result<Vec<LuaValue>, VmError> {
+    gas.charge(haystack.len() as u64)?;
 
     if needle.is_empty() {
         let pos = init.min(haystack.len());
@@ -415,6 +419,25 @@ fn string_find(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>, V
         }
         None => Ok(vec![LuaValue::Nil, LuaValue::Nil]),
     }
+}
+
+fn string_find(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>, VmError> {
+    let s = require_string(args, 0, "string.find")?;
+    let pat = require_string(args, 1, "string.find")?;
+    let init = parse_find_init(args, "string.find")?;
+    check_no_pattern_metachar(pat.as_bytes())?;
+    literal_substring_search(s.as_bytes(), pat.as_bytes(), init, gas)
+}
+
+/// `string.find_literal(s, needle [, init])` — like `string.find` but treats
+/// every byte of `needle` as a literal, so callers can search for substrings
+/// containing pattern metacharacters (`.`, `*`, `+`, `?`, `^`, `$`, `(`, `)`,
+/// `%`, `[`, `]`, `-`) without first escaping them.
+fn string_find_literal(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>, VmError> {
+    let s = require_string(args, 0, "string.find_literal")?;
+    let needle = require_string(args, 1, "string.find_literal")?;
+    let init = parse_find_init(args, "string.find_literal")?;
+    literal_substring_search(s.as_bytes(), needle.as_bytes(), init, gas)
 }
 
 fn string_upper(
@@ -1430,6 +1453,7 @@ fn build_string_module() -> LuaTable {
     sf!("len", BuiltinId::StringLen);
     sf!("sub", BuiltinId::StringSub);
     sf!("find", BuiltinId::StringFind);
+    sf!("find_literal", BuiltinId::StringFindLiteral);
     sf!("upper", BuiltinId::StringUpper);
     sf!("lower", BuiltinId::StringLower);
     sf!("rep", BuiltinId::StringRep);
@@ -1794,6 +1818,56 @@ mod tests {
     fn string_find_with_init() {
         let r = dispatch(BuiltinId::StringFind, vec![s("abcabc"), s("b"), int(3)]).unwrap();
         assert_eq!(r, vec![int(5), int(5)]);
+    }
+
+    // ── string.find_literal ───────────────────────────────────────────────────
+
+    #[test]
+    fn string_find_literal_matches_dot() {
+        let r = dispatch(BuiltinId::StringFindLiteral, vec![s("3245.67"), s(".")]).unwrap();
+        assert_eq!(r, vec![int(5), int(5)]);
+    }
+
+    #[test]
+    fn string_find_literal_matches_multi_metachar_substring() {
+        let r = dispatch(
+            BuiltinId::StringFindLiteral,
+            vec![s("x a.b*c y"), s("a.b*c")],
+        )
+        .unwrap();
+        assert_eq!(r, vec![int(3), int(7)]);
+    }
+
+    #[test]
+    fn string_find_literal_not_found_returns_nil_pair() {
+        let r = dispatch(BuiltinId::StringFindLiteral, vec![s("hello"), s("xyz")]).unwrap();
+        assert_eq!(r, vec![LuaValue::Nil, LuaValue::Nil]);
+    }
+
+    #[test]
+    fn string_find_literal_with_init_skips_prior_match() {
+        let r = dispatch(
+            BuiltinId::StringFindLiteral,
+            vec![s("a.b.c"), s("."), int(3)],
+        )
+        .unwrap();
+        assert_eq!(r, vec![int(4), int(4)]);
+    }
+
+    #[test]
+    fn string_find_literal_init_past_end_returns_nil_pair() {
+        let r = dispatch(
+            BuiltinId::StringFindLiteral,
+            vec![s("abc"), s("a"), int(99)],
+        )
+        .unwrap();
+        assert_eq!(r, vec![LuaValue::Nil, LuaValue::Nil]);
+    }
+
+    #[test]
+    fn string_find_literal_empty_needle_returns_init_position() {
+        let r = dispatch(BuiltinId::StringFindLiteral, vec![s("hello"), s("")]).unwrap();
+        assert_eq!(r, vec![int(1), int(0)]);
     }
 
     // ── string.upper / lower ──────────────────────────────────────────────────

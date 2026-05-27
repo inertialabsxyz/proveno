@@ -35,6 +35,7 @@ pub enum BuiltinId {
     StringLen,
     StringSub,
     StringFind,
+    StringFindLiteral,
     StringUpper,
     StringLower,
     StringRep,

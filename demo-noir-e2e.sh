@@ -62,6 +62,26 @@ DEMO_PRICE="${DEMO_PRICE:-100000000000000000000}"
 DEMO_SOURCES="${DEMO_SOURCES:-1}"
 DEMO_TS="${DEMO_TS:-1700000000}"
 
+# ─── .env autoload ───────────────────────────────────────────────────────────
+# The orchestrator binary reads .env via dotenvy, but this shell script's own
+# prereq checks (e.g. ANTHROPIC_API_KEY below) run before the orchestrator
+# starts, so we have to source .env here too. Looks for .env next to this
+# script. Matches dotenvy semantics: existing environment variables win, so
+# `KEY=… ./demo-noir-e2e.sh …` overrides what's in .env.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip blank lines and comments.
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        # Tolerate `export KEY=VALUE` form.
+        line="${line#export }"
+        key="${line%%=*}"
+        # Skip malformed lines (no `=`) and keys already in the env.
+        [[ "$key" == "$line" || -n "${!key+set}" ]] && continue
+        export "$line"
+    done < "$SCRIPT_DIR/.env"
+fi
+
 # ─── prerequisite checks ─────────────────────────────────────────────────────
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then

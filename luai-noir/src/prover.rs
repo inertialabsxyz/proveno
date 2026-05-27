@@ -133,7 +133,10 @@ impl NoirProver {
         let proof_path = target_dir.join("proof");
 
         // 2. bb write_vk → cached on disk; only regenerate if missing or stale
-        //    relative to the ACIR bytecode.
+        //    relative to the ACIR bytecode. `-t evm` selects the keccak/ZK
+        //    pipeline that matches the on-chain HonkVerifier.sol; without it
+        //    bb defaults to a different verifier target and the proof bytes
+        //    cannot be verified on chain.
         if vk_needs_refresh(&vk_path, &bytecode_path)? {
             let vk_out = Command::new(bb_binary())
                 .arg("write_vk")
@@ -141,6 +144,8 @@ impl NoirProver {
                 .arg(&bytecode_path)
                 .arg("-o")
                 .arg(&target_dir)
+                .arg("-t")
+                .arg("evm")
                 .output()
                 .map_err(|e| match e.kind() {
                     std::io::ErrorKind::NotFound => ProveError::BbNotFound,
@@ -154,6 +159,7 @@ impl NoirProver {
         }
 
         // 3. bb prove → produces target/proof and target/public_inputs.
+        //    `-t evm` must match the target used for write_vk above.
         let start = Instant::now();
         let prove_out = Command::new(bb_binary())
             .arg("prove")
@@ -165,6 +171,8 @@ impl NoirProver {
             .arg(&vk_path)
             .arg("-o")
             .arg(&target_dir)
+            .arg("-t")
+            .arg("evm")
             .output()
             .map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => ProveError::BbNotFound,
@@ -212,6 +220,8 @@ impl NoirProver {
             .arg(&proof_path)
             .arg("-i")
             .arg(&public_inputs_path)
+            .arg("-t")
+            .arg("evm")
             .output()
             .map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => ProveError::BbNotFound,

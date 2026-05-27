@@ -1,11 +1,6 @@
-mod llm;
-mod pipeline;
-mod prompt;
-mod prove;
-mod tools;
-
 use clap::Parser;
 use luai::{types::value::LuaValue, vm::engine::VmConfig};
+use luai_orchestrator::{llm, pipeline, prompt, prove, tools};
 
 #[derive(Parser)]
 #[command(name = "luai-orchestrator")]

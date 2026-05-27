@@ -129,7 +129,7 @@ mod tests {
         let policy = constrained_http_v1();
         let expected_hash = policy.policy_hash();
 
-        let prover = Prover::new(VmConfig::default(), ProverHost {}, vec![]);
+        let prover = Prover::new(VmConfig::default(), ProverHost::new(), vec![]);
         let result = prover
             .dry_run_with_policy(&program.into(), LuaValue::Nil, vec![], &policy)
             .expect("dry_run_with_policy failed");

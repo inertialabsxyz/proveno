@@ -43,16 +43,12 @@ pub fn encode_program(program: &CompiledProgram) -> Result<NoirBytecode, EncodeE
         }
     }
 
-    // Poseidon2 over interleaved (opcode_field, operand_field) for live
-    // instructions only. Matches the circuit: Poseidon2::hash(inputs[2*instr_count]).
-    // i64 operands are widened to u64 via the bit pattern (so -1 → u64::MAX),
-    // mirroring how the Noir side coerces signed operands into Field.
-    let mut inputs = Vec::with_capacity(count * 2);
-    for i in 0..count {
-        inputs.push(u8_to_field(opcodes[i]));
-        inputs.push(i64_to_field(operands[i]));
-    }
-    let program_hash = field_to_be_bytes32(poseidon2_hash(&inputs));
+    // The compiler already stores the Poseidon2 program hash on CompiledProgram
+    // at compile time (see crate::compiler::program_hash). It is byte-identical
+    // to what the circuit recomputes over (opcodes, operands), so we reuse it
+    // here rather than hash twice — that guarantees there is exactly one
+    // definition of "the program hash" in the Rust tree.
+    let program_hash = program.program_hash;
 
     Ok(NoirBytecode {
         opcodes,
@@ -61,6 +57,31 @@ pub fn encode_program(program: &CompiledProgram) -> Result<NoirBytecode, EncodeE
         instr_count: count,
         prototype_offsets,
     })
+}
+
+/// Compute the Poseidon2 program hash over a flat sequence of (opcode, operand)
+/// pairs. This is the single source of truth for "the program hash" in the
+/// Rust tree, and it matches `assert_bytecode` in noir/src/main.nr byte-for-byte:
+///
+/// ```text
+/// hash_input[i*2]     = opcodes[i]  as Field   // u8  → Field
+/// hash_input[i*2 + 1] = operands[i] as u64 as Field  // i64 → u64 bit-pattern → Field
+/// program_hash        = Poseidon2::hash(hash_input, instr_count * 2)
+/// ```
+///
+/// Callers feed it the same instruction stream the witness writer packs into
+/// `bytecode_opcodes` / `bytecode_operands` (the encoder builds that stream
+/// from `program.prototypes` in declaration order).
+pub fn compute_program_hash(prototypes: &[crate::compiler::proto::FunctionProto]) -> [u8; 32] {
+    let count: usize = prototypes.iter().map(|p| p.code.len()).sum();
+    let mut inputs = Vec::with_capacity(count * 2);
+    for proto in prototypes {
+        for instr in &proto.code {
+            inputs.push(u8_to_field(instruction_to_opcode_id(instr)));
+            inputs.push(i64_to_field(instruction_to_operand(instr)));
+        }
+    }
+    field_to_be_bytes32(poseidon2_hash(&inputs))
 }
 
 #[cfg(test)]

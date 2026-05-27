@@ -86,7 +86,7 @@ impl Compiler {
         let proto = c.exit_function();
         // Overwrite the placeholder at index 0.
         c.prototypes[0] = proto;
-        let program_hash = super::canonical_hash(&c.prototypes);
+        let program_hash = crate::noir::encoder::compute_program_hash(&c.prototypes);
         Ok(super::proto::CompiledProgram {
             prototypes: c.prototypes,
             program_hash,

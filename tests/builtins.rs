@@ -272,6 +272,48 @@ fn string_find_metachar_error() {
     assert!(matches!(err, VmError::RuntimeError(_)));
 }
 
+// ── string.find_literal ───────────────────────────────────────────────────────
+
+#[test]
+fn string_find_literal_matches_dot_in_price() {
+    assert_returns_int(
+        r#"local i, j = string.find_literal("3245.67", ".") return i"#,
+        5,
+    );
+}
+
+#[test]
+fn string_find_literal_splits_decimal_into_int_and_frac() {
+    // The motivating use case: parse "3245.67" into integer cents (324567)
+    // without `tonumber` silently returning nil. Pins that the builtin supports
+    // the canonical price-parsing pattern recommended in the system prompt.
+    assert_returns_int(
+        r#"
+local raw = "3245.67"
+local dot = string.find_literal(raw, ".")
+local int_part = string.sub(raw, 1, dot - 1)
+local frac_part = string.sub(raw, dot + 1)
+return tonumber(int_part) * 100 + tonumber(frac_part)
+"#,
+        324567,
+    );
+}
+
+#[test]
+fn string_find_literal_matches_multi_metachar_substring() {
+    // Returns the first return value (start index). Pins that a needle
+    // containing several pattern metacharacters is treated literally.
+    assert_returns_int(
+        r#"local i, j = string.find_literal("x a.b*c y", "a.b*c") return i"#,
+        3,
+    );
+}
+
+#[test]
+fn string_find_literal_not_found_returns_nil() {
+    assert_returns_nil(r#"local i, j = string.find_literal("hello", "xyz") return i"#);
+}
+
 // ── string.upper / lower ──────────────────────────────────────────────────────
 
 #[test]

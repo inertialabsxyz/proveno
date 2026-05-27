@@ -76,8 +76,10 @@ if [[ -f "$SCRIPT_DIR/.env" ]]; then
         # Tolerate `export KEY=VALUE` form.
         line="${line#export }"
         key="${line%%=*}"
-        # Skip malformed lines (no `=`) and keys already in the env.
-        [[ "$key" == "$line" || -n "${!key+set}" ]] && continue
+        # Skip malformed lines (no `=`) and keys already in the env with a
+        # non-empty value. An exported-but-empty var (common in some shell
+        # rc setups) should NOT block .env from filling it in.
+        [[ "$key" == "$line" || -n "${!key:-}" ]] && continue
         export "$line"
     done < "$SCRIPT_DIR/.env"
 fi

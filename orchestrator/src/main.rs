@@ -49,6 +49,18 @@ struct Cli {
     #[arg(long)]
     generate_only: bool,
 
+    /// Generate + compile + verify, then stop. No execution, no retry. Single
+    /// fresh-conversation attempt — designed for measuring raw LLM code-gen
+    /// quality without retry feedback contaminating the signal.
+    #[arg(long)]
+    generate_and_compile: bool,
+
+    /// Repeat the `--generate-and-compile` pass N times with independent
+    /// conversations, then print a stage histogram. Requires
+    /// `--generate-and-compile`.
+    #[arg(long)]
+    repeat: Option<usize>,
+
     /// Generate ZK proof artifacts after successful execution
     #[arg(long)]
     prove: bool,
@@ -108,6 +120,22 @@ fn main() {
         eprintln!("── System prompt ──────────────────────────────");
         eprintln!("{system_prompt}");
         eprintln!("───────────────────────────────────────────────\n");
+    }
+
+    // --generate-and-compile path: skip the retry loop entirely. Optionally
+    // batch via --repeat to characterize per-stage failure modes of the LLM.
+    if cli.generate_and_compile {
+        if let Some(0) = cli.repeat {
+            eprintln!("error: --repeat must be >= 1");
+            std::process::exit(1);
+        }
+        let n = cli.repeat.unwrap_or(1);
+        run_generate_and_compile_batch(&client, &system_prompt, &cli.task, n, cli.json);
+        return;
+    }
+    if cli.repeat.is_some() {
+        eprintln!("error: --repeat requires --generate-and-compile");
+        std::process::exit(1);
     }
 
     // Conversation history for multi-turn retry
@@ -360,5 +388,89 @@ fn print_json(result: &pipeline::PipelineResult, prove_artifacts: &Option<prove:
         json["proving"] = proving;
     }
 
+    println!("{}", serde_json::to_string_pretty(&json).unwrap());
+}
+
+/// Run `pipeline::generate_and_compile` `n` times with fresh conversations
+/// and print either a single-run report (n=1) or a histogram + per-run
+/// table (n>1). Each run is independent so retry feedback cannot
+/// contaminate the per-stage failure measurement.
+fn run_generate_and_compile_batch(
+    client: &llm::LlmClient,
+    system_prompt: &str,
+    task: &str,
+    n: usize,
+    json: bool,
+) {
+    let mut outcomes: Vec<pipeline::GenerateCompileOutcome> = Vec::with_capacity(n);
+    for i in 1..=n {
+        eprintln!("[run {i}/{n}] generating + compiling...");
+        let outcome = pipeline::generate_and_compile(client, system_prompt, task);
+        eprintln!(
+            "  → {} ({} ms, {} tok)",
+            outcome.stage,
+            outcome.latency_ms,
+            outcome.usage.total()
+        );
+        outcomes.push(outcome);
+    }
+    let hist = pipeline::StageHistogram::from_outcomes(&outcomes);
+
+    if json {
+        print_generate_and_compile_json(task, &hist, &outcomes);
+    } else if n == 1 {
+        let o = &outcomes[0];
+        println!("── Generate + compile result ──────────────────");
+        println!("Task:    {task:?}");
+        println!("Stage:   {} ({} ms)", o.stage, o.latency_ms);
+        if let Some(ref err) = o.error {
+            println!("Error:   {err}");
+        }
+        println!(
+            "Tokens:  {} in + {} out = {} total",
+            o.usage.input_tokens,
+            o.usage.output_tokens,
+            o.usage.total()
+        );
+        if let Some(ref src) = o.source {
+            println!("── Source ─────────────────────────────────────");
+            println!("{src}");
+        }
+    } else {
+        print!("{}", pipeline::format_histogram(&hist, &outcomes));
+    }
+}
+
+fn print_generate_and_compile_json(
+    task: &str,
+    hist: &pipeline::StageHistogram,
+    outcomes: &[pipeline::GenerateCompileOutcome],
+) {
+    let runs: Vec<serde_json::Value> = outcomes
+        .iter()
+        .map(|o| {
+            serde_json::json!({
+                "stage": o.stage.label(),
+                "error": o.error,
+                "source": o.source,
+                "latency_ms": o.latency_ms as u64,
+                "input_tokens": o.usage.input_tokens,
+                "output_tokens": o.usage.output_tokens,
+            })
+        })
+        .collect();
+
+    let json = serde_json::json!({
+        "task": task,
+        "runs": runs,
+        "histogram": {
+            "generate": hist.generate,
+            "parse": hist.parse,
+            "compile": hist.compile,
+            "verify": hist.verify,
+            "compiled": hist.compiled,
+            "total": hist.total(),
+        },
+    });
     println!("{}", serde_json::to_string_pretty(&json).unwrap());
 }

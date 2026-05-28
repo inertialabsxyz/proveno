@@ -89,6 +89,7 @@ pub fn call_builtin(
         // ── json ──────────────────────────────────────────────────────────────
         BuiltinId::JsonEncode => json_encode(args, gas, mem),
         BuiltinId::JsonDecode => json_decode(args, gas, mem),
+        BuiltinId::JsonDecodeStrings => json_decode_strings(args, gas, mem),
         // log/error are handled as dedicated opcodes; if somehow called as builtins,
         // treat log here for consistency.
     }
@@ -1054,11 +1055,46 @@ fn json_decode(
     Ok(vec![val])
 }
 
+/// Sibling of `json.decode` that returns every JSON number as its raw source
+/// string. The VM is integer-only, so `json.decode` rejects fractional /
+/// exponent numbers; this variant lets Lua programs receive the verbatim
+/// number text and decide how to interpret it (typically via the
+/// split-on-dot-then-scale idiom documented in the orchestrator system prompt).
+fn json_decode_strings(
+    args: &[LuaValue],
+    gas: &mut GasMeter,
+    mem: &mut MemoryMeter,
+) -> Result<Vec<LuaValue>, VmError> {
+    let s = require_string(args, 0, "json.decode_strings")?;
+    let input = s.as_bytes();
+    gas.charge(input.len() as u64)?;
+    let (val, end) = json_parse_with_mode(input, mem, NumberMode::Verbatim)?;
+    if end != input.len() {
+        return Err(runtime_err(&format!(
+            "json.decode_strings: trailing characters at position {end}"
+        )));
+    }
+    Ok(vec![val])
+}
+
+/// Controls how the JSON parser handles numbers.
+///
+/// `Integer` is `json.decode`'s behaviour: parse the digits as `i64` and reject
+/// any fractional or exponent notation.
+/// `Verbatim` is `json.decode_strings`'s behaviour: accept the full JSON number
+/// production and return the raw source bytes as a `LuaString`.
+#[derive(Debug, Clone, Copy)]
+enum NumberMode {
+    Integer,
+    Verbatim,
+}
+
 struct JsonParser<'a> {
     input: &'a [u8],
     pos: usize,
     depth: usize,
     mem: &'a mut MemoryMeter,
+    number_mode: NumberMode,
 }
 
 impl<'a> JsonParser<'a> {
@@ -1068,6 +1104,17 @@ impl<'a> JsonParser<'a> {
             pos: 0,
             depth: 0,
             mem,
+            number_mode: NumberMode::Integer,
+        }
+    }
+
+    fn with_mode(input: &'a [u8], mem: &'a mut MemoryMeter, number_mode: NumberMode) -> Self {
+        JsonParser {
+            input,
+            pos: 0,
+            depth: 0,
+            mem,
+            number_mode,
         }
     }
 
@@ -1218,6 +1265,13 @@ impl<'a> JsonParser<'a> {
     }
 
     fn parse_number(&mut self) -> Result<LuaValue, VmError> {
+        match self.number_mode {
+            NumberMode::Integer => self.parse_number_as_integer(),
+            NumberMode::Verbatim => self.parse_number_as_string(),
+        }
+    }
+
+    fn parse_number_as_integer(&mut self) -> Result<LuaValue, VmError> {
         let start = self.pos;
         if self.peek() == Some(b'-') {
             self.pos += 1;
@@ -1237,6 +1291,59 @@ impl<'a> JsonParser<'a> {
             .parse::<i64>()
             .map_err(|_| runtime_err("json.decode: number out of i64 range"))?;
         Ok(LuaValue::Integer(n))
+    }
+
+    /// Consume the full JSON number production (optional `-`, integer part,
+    /// optional `.` fractional part, optional `[eE][+-]?` exponent) and
+    /// return the matched bytes verbatim as a `LuaString`. No normalization
+    /// is performed — what was in the source is what the program receives.
+    fn parse_number_as_string(&mut self) -> Result<LuaValue, VmError> {
+        let start = self.pos;
+        if self.peek() == Some(b'-') {
+            self.pos += 1;
+        }
+        // Integer part: require at least one digit.
+        let int_start = self.pos;
+        while let Some(b'0'..=b'9') = self.peek() {
+            self.pos += 1;
+        }
+        if self.pos == int_start {
+            return Err(runtime_err(
+                "json.decode_strings: invalid number (missing integer part)",
+            ));
+        }
+        // Optional fractional part.
+        if self.peek() == Some(b'.') {
+            self.pos += 1;
+            let frac_start = self.pos;
+            while let Some(b'0'..=b'9') = self.peek() {
+                self.pos += 1;
+            }
+            if self.pos == frac_start {
+                return Err(runtime_err(
+                    "json.decode_strings: invalid number (missing fractional digits)",
+                ));
+            }
+        }
+        // Optional exponent part.
+        if matches!(self.peek(), Some(b'e') | Some(b'E')) {
+            self.pos += 1;
+            if matches!(self.peek(), Some(b'+') | Some(b'-')) {
+                self.pos += 1;
+            }
+            let exp_start = self.pos;
+            while let Some(b'0'..=b'9') = self.peek() {
+                self.pos += 1;
+            }
+            if self.pos == exp_start {
+                return Err(runtime_err(
+                    "json.decode_strings: invalid number (missing exponent digits)",
+                ));
+            }
+        }
+        let slice = &self.input[start..self.pos];
+        self.mem.track_alloc(alloc_size::string(slice.len()))?;
+        Ok(LuaValue::String(LuaString::from_bytes(slice)))
     }
 
     fn parse_array(&mut self) -> Result<LuaValue, VmError> {
@@ -1334,6 +1441,17 @@ fn json_parse(
     mem: &mut MemoryMeter,
 ) -> Result<(LuaValue, usize), VmError> {
     let mut parser = JsonParser::new(input, mem);
+    let v = parser.parse_value()?;
+    parser.skip_ws();
+    Ok((v, parser.pos))
+}
+
+fn json_parse_with_mode(
+    input: &[u8],
+    mem: &mut MemoryMeter,
+    mode: NumberMode,
+) -> Result<(LuaValue, usize), VmError> {
+    let mut parser = JsonParser::with_mode(input, mem, mode);
     let v = parser.parse_value()?;
     parser.skip_ws();
     Ok((v, parser.pos))
@@ -1523,6 +1641,11 @@ fn build_json_module() -> LuaTable {
     t.rawset(
         LuaKey::String(LuaString::from_str("decode")),
         LuaValue::Builtin(BuiltinId::JsonDecode),
+    )
+    .unwrap();
+    t.rawset(
+        LuaKey::String(LuaString::from_str("decode_strings")),
+        LuaValue::Builtin(BuiltinId::JsonDecodeStrings),
     )
     .unwrap();
     t

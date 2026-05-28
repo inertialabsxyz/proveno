@@ -87,6 +87,23 @@ impl HostInterface for StubHost {
 
 // ── LiveHost ─────────────────────────────────────────────────────────────────
 
+/// Format a reqwest error including its full source chain.
+///
+/// reqwest::Error's Display only shows the top-line message (e.g.
+/// "error sending request for url (...)"); the actual cause
+/// (TLS / connect / timeout details) lives in `source()` and is lost
+/// by a plain `{e}`. This walks the chain and joins each layer with ": ".
+pub(crate) fn format_reqwest_error(prefix: &str, e: &reqwest::Error) -> String {
+    let mut msg = format!("{prefix}: {e}");
+    let mut src: Option<&dyn std::error::Error> = std::error::Error::source(e);
+    while let Some(cause) = src {
+        msg.push_str(": ");
+        msg.push_str(&cause.to_string());
+        src = cause.source();
+    }
+    msg
+}
+
 /// Maximum response body size for HTTP tools (1 MB).
 const MAX_HTTP_BODY: usize = 1024 * 1024;
 /// HTTP request timeout in seconds.
@@ -117,11 +134,11 @@ impl LiveHost {
             .http
             .get(&url)
             .send()
-            .map_err(|e| format!("http_get failed: {e}"))?;
+            .map_err(|e| format_reqwest_error("http_get failed", &e))?;
         let status = resp.status().as_u16() as i64;
         let body = resp
             .text()
-            .map_err(|e| format!("http_get: failed to read body: {e}"))?;
+            .map_err(|e| format_reqwest_error("http_get: failed to read body", &e))?;
         let body = if body.len() > MAX_HTTP_BODY {
             body[..MAX_HTTP_BODY].to_string()
         } else {
@@ -150,11 +167,11 @@ impl LiveHost {
             .header("content-type", "application/json")
             .body(body)
             .send()
-            .map_err(|e| format!("http_post failed: {e}"))?;
+            .map_err(|e| format_reqwest_error("http_post failed", &e))?;
         let status = resp.status().as_u16() as i64;
         let resp_body = resp
             .text()
-            .map_err(|e| format!("http_post: failed to read body: {e}"))?;
+            .map_err(|e| format_reqwest_error("http_post: failed to read body", &e))?;
         let resp_body = if resp_body.len() > MAX_HTTP_BODY {
             resp_body[..MAX_HTTP_BODY].to_string()
         } else {
@@ -636,6 +653,36 @@ mod tests {
             assert!(!desc.name.is_empty());
             assert!(!desc.description.is_empty());
         }
+    }
+
+    // ── format_reqwest_error: source chain is preserved ──────────────
+
+    #[test]
+    fn format_reqwest_error_includes_full_cause_chain() {
+        // Drive a real reqwest failure against an unreachable port. The
+        // resulting reqwest::Error always has at least one nested cause
+        // (the underlying io / connect / hyper error), so the formatted
+        // message should contain "<prefix>: <top-line>: <cause...>" —
+        // i.e. at least 3 ':'-separated segments.
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(1))
+            .build()
+            .unwrap();
+        let err = client
+            .get("http://127.0.0.1:1/")
+            .send()
+            .expect_err("request to 127.0.0.1:1 should fail");
+
+        let msg = format_reqwest_error("http_get failed", &err);
+        assert!(
+            msg.starts_with("http_get failed: "),
+            "missing prefix in {msg:?}"
+        );
+        let colon_segments = msg.matches(": ").count();
+        assert!(
+            colon_segments >= 2,
+            "expected at least one nested cause (>=2 ': ' separators) in {msg:?}"
+        );
     }
 }
 

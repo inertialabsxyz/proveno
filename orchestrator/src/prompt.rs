@@ -94,7 +94,7 @@ const SYSTEM_PREAMBLE: &str = r#"You are a Lua program generator. You write Lua 
 - `string.len(s)`, `string.sub(s, i [, j])`, `string.find(s, pattern [, init])`, `string.find_literal(s, needle [, init])`, `string.upper(s)`, `string.lower(s)`, `string.rep(s, n)`, `string.byte(s [, i])`, `string.char(...)`, `string.format(fmt, ...)`
 - `math.abs(x)`, `math.min(...)`, `math.max(...)`, `math.scale_div(num, denom, scale)`
 - `table.insert(t [, i], v)`, `table.remove(t [, i])`, `table.concat(t [, sep])`, `table.move(src, a, b, t)`, `table.sort(t [, comp])`
-- `json.encode(v)` — serialize to JSON string; `json.decode(s)` — parse JSON string
+- `json.encode(v)` — serialize to JSON string; `json.decode(s)` — parse JSON (integer-only; errors on any fractional number anywhere in the payload); `json.decode_strings(s)` — parse JSON returning every number as its raw source string (use this for API responses containing floats; then split on `.` and scale to an integer per the Numeric gotchas section)
 - `type(v)`, `tostring(v)`, `tonumber(s)`, `select(i, ...)`, `unpack(t)`, `pcall(f, ...)`, `error(msg)`, `log(msg)`, `print(msg)`
 - `pairs_sorted(t)` — iterate table keys in deterministic order; `ipairs(t)` — iterate array portion
 
@@ -116,12 +116,12 @@ const SYSTEM_PREAMBLE: &str = r#"You are a Lua program generator. You write Lua 
   `if value == nil then error("failed to parse price from " .. raw) end`
 - `string.find` rejects all Lua pattern metacharacters (`.`, `*`, `+`, `?`, `^`, `$`, `(`, `)`, `%`, `[`, `]`, `-`) even when you want them as literals. Use `string.find_literal(s, needle [, init])` whenever you need to search for one of these characters or any substring containing them.
 - For decimal API responses (prices, rates, percentages), parse them into integers at a fixed scale:
-    1. Get the raw string, e.g. `"3245.67"`.
+    1. Get the raw string. If the value lives inside a JSON payload that also contains any other fractional fields (e.g. an open-meteo or coingecko response), parse the whole payload with `json.decode_strings(body)` rather than `json.decode(body)` — the latter errors on the first float it sees anywhere in the document, even fields you don't care about. `json.decode_strings` returns every number as its verbatim source string (e.g. `"3245.67"`, `"-2.5E-3"`).
     2. Find the dot with `local dot = string.find_literal(raw, ".")`.
     3. Take the integer and fractional parts with `string.sub(raw, 1, dot - 1)` and `string.sub(raw, dot + 1)`.
     4. Pad or truncate the fractional part to a fixed scale (e.g. 8 digits for satoshi-style, or 2 for cents).
     5. Concatenate and `tonumber` *that*. Document the scale in your returned value (e.g. `price_scale = 8`).
-- Prefer API endpoints that return integer-valued fields when one is available (e.g. a price already quoted in cents, or a Coingecko endpoint with `precision=0` for whole units).
+- Prefer API endpoints that return integer-valued fields when one is available (e.g. a price already quoted in cents, or a Coingecko endpoint with `precision=0` for whole units). When that's not an option, reach for `json.decode_strings` and the split-on-dot recipe above.
 "#;
 
 const OUTPUT_INSTRUCTIONS: &str = r#"
@@ -229,6 +229,30 @@ mod tests {
         assert!(prompt.contains("string.find_literal"));
         assert!(prompt.contains("## Numeric gotchas"));
         assert!(prompt.contains("integer-only"));
+    }
+
+    #[test]
+    fn prompt_advertises_json_decode_strings() {
+        // `json.decode_strings` is the load-bearing escape hatch for API
+        // responses that contain floats (which `json.decode` rejects outright,
+        // even for fields the program doesn't care about). The prompt must
+        // both name the function in the stdlib listing and cross-reference it
+        // from the Numeric gotchas integerization recipe.
+        let prompt = build_system_prompt(&[]);
+        assert!(
+            prompt.contains("json.decode_strings"),
+            "prompt must advertise json.decode_strings"
+        );
+        // The gotchas section must point at it as the recommended path for
+        // payloads with floats — not just list it in the stdlib reference.
+        let gotchas = prompt
+            .split("## Numeric gotchas")
+            .nth(1)
+            .expect("Numeric gotchas section must exist");
+        assert!(
+            gotchas.contains("json.decode_strings"),
+            "Numeric gotchas section must cross-reference json.decode_strings"
+        );
     }
 
     // ── ToolCatalogue tests ──────────────────────────────────────────

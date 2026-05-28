@@ -57,6 +57,7 @@ pub enum BuiltinId {
     // json module
     JsonEncode,
     JsonDecode,
+    JsonDecodeStrings,
 }
 
 /// A Lua closure: a function prototype index plus captured upvalues.

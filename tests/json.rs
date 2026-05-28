@@ -263,6 +263,199 @@ fn json_decode_depth_exceeded_pcall_integration() {
     assert_returns_bool(src, false);
 }
 
+// ── json.decode_strings ───────────────────────────────────────────────────────
+//
+// Sibling of `json.decode` that returns every JSON number as its verbatim
+// source string. This lets Lua programs consume real-world API responses that
+// contain floats (which `json.decode` rejects) by leaving the integerization
+// strategy up to the program.
+
+#[test]
+fn json_decode_strings_integer_integration() {
+    assert_returns_str(r#"return json.decode_strings("42")"#, "42");
+}
+
+#[test]
+fn json_decode_strings_negative_integer_integration() {
+    assert_returns_str(r#"return json.decode_strings("-7")"#, "-7");
+}
+
+#[test]
+fn json_decode_strings_fractional_integration() {
+    assert_returns_str(r#"return json.decode_strings("3.14")"#, "3.14");
+}
+
+#[test]
+fn json_decode_strings_negative_fractional_integration() {
+    assert_returns_str(r#"return json.decode_strings("-0.5")"#, "-0.5");
+}
+
+#[test]
+fn json_decode_strings_exponent_integration() {
+    assert_returns_str(r#"return json.decode_strings("1e10")"#, "1e10");
+}
+
+#[test]
+fn json_decode_strings_signed_exponent_integration() {
+    // Verbatim: uppercase E and a signed exponent are preserved exactly.
+    assert_returns_str(r#"return json.decode_strings("-2.5E-3")"#, "-2.5E-3");
+}
+
+#[test]
+fn json_decode_strings_null_integration() {
+    assert_returns_nil(r#"return json.decode_strings("null")"#);
+}
+
+#[test]
+fn json_decode_strings_bool_integration() {
+    assert_returns_bool(r#"return json.decode_strings("true")"#, true);
+    assert_returns_bool(r#"return json.decode_strings("false")"#, false);
+}
+
+#[test]
+fn json_decode_strings_string_integration() {
+    // String values are unchanged from json.decode — only numbers differ.
+    assert_returns_str(r#"return json.decode_strings('"hi"')"#, "hi");
+}
+
+#[test]
+fn json_decode_strings_object_field_fractional_integration() {
+    // The whole point: a JSON object containing a float must parse, and the
+    // field must be retrievable as the verbatim "3.14" string.
+    assert_returns_str(
+        r#"return json.decode_strings('{"t":3.14,"u":"c"}')["t"]"#,
+        "3.14",
+    );
+}
+
+#[test]
+fn json_decode_strings_object_field_string_unchanged_integration() {
+    // Non-number siblings inside the same object must still be normal strings.
+    assert_returns_str(
+        r#"return json.decode_strings('{"t":3.14,"u":"c"}')["u"]"#,
+        "c",
+    );
+}
+
+#[test]
+fn json_decode_strings_nested_real_world_shape_integration() {
+    // Mirrors the open-meteo response shape: a top-level object containing a
+    // nested object with mixed floats and strings. This is the exact pattern
+    // that motivated this builtin.
+    assert_returns_str(
+        r#"
+        local resp = json.decode_strings('{"current_weather":{"temperature":18.4,"unit":"c"}}')
+        return resp["current_weather"]["temperature"]
+        "#,
+        "18.4",
+    );
+}
+
+#[test]
+fn json_decode_strings_array_of_floats_integration() {
+    // Array of floats: indexing returns the verbatim source for each entry.
+    assert_returns_str(
+        r#"return json.decode_strings("[1.0, 2.5, -3.75]")[2]"#,
+        "2.5",
+    );
+}
+
+#[test]
+fn json_decode_strings_split_on_dot_integerization_integration() {
+    // End-to-end smoke test of the recommended integerization recipe: decode
+    // the verbatim string, split on the dot, scale, recombine, tonumber.
+    // Pins that decode_strings hands back exactly the text needed to feed the
+    // split-on-dot pattern documented in the orchestrator prompt.
+    assert_returns_int(
+        r#"
+        local raw = json.decode_strings("3.14")
+        local dot = string.find_literal(raw, ".")
+        local int_part = string.sub(raw, 1, dot - 1)
+        local frac_part = string.sub(raw, dot + 1)
+        -- Pad/truncate to 2 fractional digits.
+        while string.len(frac_part) < 2 do frac_part = frac_part .. "0" end
+        frac_part = string.sub(frac_part, 1, 2)
+        return tonumber(int_part .. frac_part)
+        "#,
+        314,
+    );
+}
+
+#[test]
+fn json_decode_strings_malformed_error_pcall_integration() {
+    assert_returns_bool(
+        r#"
+        local ok, err = pcall(function()
+            return json.decode_strings("not-json")
+        end)
+        return ok
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn json_decode_strings_trailing_garbage_error_pcall_integration() {
+    assert_returns_bool(
+        r#"
+        local ok, err = pcall(function()
+            return json.decode_strings("42 garbage")
+        end)
+        return ok
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn json_decode_strings_unterminated_string_error_pcall_integration() {
+    assert_returns_bool(
+        r#"
+        local ok, err = pcall(function()
+            return json.decode_strings('"unterminated')
+        end)
+        return ok
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn json_decode_strings_missing_fractional_digits_error_pcall_integration() {
+    // "1." is not a valid JSON number per RFC 8259 — fractional part needs
+    // at least one digit. decode_strings must reject it.
+    assert_returns_bool(
+        r#"
+        local ok, err = pcall(function()
+            return json.decode_strings("1.")
+        end)
+        return ok
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn json_decode_strings_missing_exponent_digits_error_pcall_integration() {
+    // "1e" is not a valid JSON number — exponent needs at least one digit.
+    assert_returns_bool(
+        r#"
+        local ok, err = pcall(function()
+            return json.decode_strings("1e")
+        end)
+        return ok
+        "#,
+        false,
+    );
+}
+
+#[test]
+fn json_decode_does_not_accept_fractional_regression() {
+    // Regression: adding json.decode_strings must NOT change json.decode.
+    // A fractional input still fails json.decode.
+    assert_runtime_err(r#"return json.decode("3.14")"#);
+}
+
 // ── Roundtrip tests ───────────────────────────────────────────────────────────
 
 #[test]

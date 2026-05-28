@@ -25,6 +25,23 @@ fn str_key(s: &str) -> LuaKey {
     LuaKey::String(LuaString::from_str(s))
 }
 
+/// Format a reqwest error including its full source chain.
+///
+/// reqwest::Error's Display only surfaces the top-line message; the
+/// actual cause (TLS / connect / timeout details) lives in `source()`
+/// and is lost by a plain `{e}`. This walks the chain and joins each
+/// layer with ": ".
+fn format_reqwest_error(prefix: &str, e: &reqwest::Error) -> String {
+    let mut msg = format!("{prefix}: {e}");
+    let mut src: Option<&dyn std::error::Error> = std::error::Error::source(e);
+    while let Some(cause) = src {
+        msg.push_str(": ");
+        msg.push_str(&cause.to_string());
+        src = cause.source();
+    }
+    msg
+}
+
 impl HostInterface for ProverHost {
     fn call_tool(&mut self, name: &str, args: &LuaTable) -> Result<LuaTable, String> {
         let mut resp = LuaTable::new();
@@ -38,9 +55,11 @@ impl HostInterface for ProverHost {
                     .client
                     .get(&url)
                     .send()
-                    .map_err(|e| format!("http_get failed: {e}"))?;
+                    .map_err(|e| format_reqwest_error("http_get failed", &e))?;
                 let status = r.status().as_u16() as i64;
-                let body = r.text().map_err(|e| format!("http_get: read error: {e}"))?;
+                let body = r
+                    .text()
+                    .map_err(|e| format_reqwest_error("http_get: read error", &e))?;
                 resp.rawset(str_key("status"), LuaValue::Integer(status))
                     .unwrap();
                 resp.rawset(

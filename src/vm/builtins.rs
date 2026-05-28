@@ -1099,13 +1099,7 @@ struct JsonParser<'a> {
 
 impl<'a> JsonParser<'a> {
     fn new(input: &'a [u8], mem: &'a mut MemoryMeter) -> Self {
-        JsonParser {
-            input,
-            pos: 0,
-            depth: 0,
-            mem,
-            number_mode: NumberMode::Integer,
-        }
+        Self::with_mode(input, mem, NumberMode::Integer)
     }
 
     fn with_mode(input: &'a [u8], mem: &'a mut MemoryMeter, number_mode: NumberMode) -> Self {

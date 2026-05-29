@@ -122,12 +122,147 @@ impl std::fmt::Display for PipelineError {
     }
 }
 
+impl PipelineError {
+    /// The pipeline stage at which this error occurred. Used for
+    /// stage-by-stage telemetry when batching independent runs.
+    pub fn stage(&self) -> Stage {
+        match self {
+            PipelineError::Parse(_) => Stage::Parse,
+            PipelineError::Compile(_) => Stage::Compile,
+            PipelineError::Verify(_) => Stage::Verify,
+            PipelineError::Runtime(_, _) => Stage::Runtime,
+        }
+    }
+}
+
+/// A discrete stage of the orchestrator pipeline. `Compiled` means the
+/// program made it past `compile_and_verify` (the deepest stage reached
+/// in `--generate-and-compile` mode).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Stage {
+    Generate,
+    Parse,
+    Compile,
+    Verify,
+    Compiled,
+    Runtime,
+}
+
+impl Stage {
+    /// Short uppercase label, used in CLI output and JSON.
+    pub fn label(self) -> &'static str {
+        match self {
+            Stage::Generate => "GENERATE",
+            Stage::Parse => "PARSE",
+            Stage::Compile => "COMPILE",
+            Stage::Verify => "VERIFY",
+            Stage::Compiled => "COMPILED",
+            Stage::Runtime => "RUNTIME",
+        }
+    }
+}
+
+impl std::fmt::Display for Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// Outcome of a single `generate + compile_and_verify` run. Used in
+/// `--generate-and-compile` and `--repeat` modes to record exactly where
+/// (and how) the LLM-generated program failed, without the retry loop
+/// contaminating the signal.
+#[derive(Debug, Clone)]
+pub struct GenerateCompileOutcome {
+    pub stage: Stage,
+    pub error: Option<String>,
+    pub source: Option<String>,
+    pub usage: crate::llm::TokenUsage,
+    pub latency_ms: u128,
+}
+
+/// Counts of outcomes per terminal stage across a batch of independent runs.
+#[derive(Debug, Clone, Default)]
+pub struct StageHistogram {
+    pub generate: usize,
+    pub parse: usize,
+    pub compile: usize,
+    pub verify: usize,
+    pub compiled: usize,
+}
+
+impl StageHistogram {
+    pub fn from_outcomes(outcomes: &[GenerateCompileOutcome]) -> Self {
+        let mut h = StageHistogram::default();
+        for o in outcomes {
+            match o.stage {
+                Stage::Generate => h.generate += 1,
+                Stage::Parse => h.parse += 1,
+                Stage::Compile => h.compile += 1,
+                Stage::Verify => h.verify += 1,
+                Stage::Compiled => h.compiled += 1,
+                // Runtime cannot occur in generate-and-compile mode; skip.
+                Stage::Runtime => {}
+            }
+        }
+        h
+    }
+
+    pub fn total(&self) -> usize {
+        self.generate + self.parse + self.compile + self.verify + self.compiled
+    }
+}
+
 /// Compile Lua source to a verified program.
 pub fn compile_and_verify(source: &str) -> Result<CompiledProgram, PipelineError> {
     let ast = parser::parse(source).map_err(|e| PipelineError::Parse(format!("{e:?}")))?;
     let program = compiler::compile(&ast).map_err(|e| PipelineError::Compile(format!("{e:?}")))?;
     bytecode::verify(&program).map_err(|e| PipelineError::Verify(format!("{e:?}")))?;
     Ok(program)
+}
+
+/// One fresh-conversation generate → compile_and_verify run.
+///
+/// Used by `--generate-and-compile` (single run) and `--repeat` (batch
+/// runs). The conversation passed to the LLM is just the system prompt
+/// plus the task, so no retry feedback can contaminate the signal.
+pub fn generate_and_compile(
+    client: &crate::llm::LlmClient,
+    system_prompt: &str,
+    task: &str,
+) -> GenerateCompileOutcome {
+    let start = std::time::Instant::now();
+    let messages = vec![crate::llm::Message {
+        role: "user".into(),
+        content: task.to_string(),
+    }];
+
+    let llm_response = match client.generate(system_prompt, &messages) {
+        Ok(r) => r,
+        Err(e) => {
+            return GenerateCompileOutcome {
+                stage: Stage::Generate,
+                error: Some(e.to_string()),
+                source: None,
+                usage: crate::llm::TokenUsage::default(),
+                latency_ms: start.elapsed().as_millis(),
+            };
+        }
+    };
+
+    let source = crate::llm::strip_code_fences(&llm_response.text);
+    let (stage, error) = match compile_and_verify(&source) {
+        Ok(_) => (Stage::Compiled, None),
+        Err(e) => (e.stage(), Some(e.to_string())),
+    };
+
+    GenerateCompileOutcome {
+        stage,
+        error,
+        source: Some(source),
+        usage: llm_response.usage,
+        latency_ms: start.elapsed().as_millis(),
+    }
 }
 
 /// Execute a compiled program with the given host and config.
@@ -171,6 +306,58 @@ pub fn format_error_for_retry(source: &str, err: &PipelineError) -> String {
     ctx.push_str(&err.to_string());
     ctx.push_str("\n\nPlease fix the program. Respond with ONLY the corrected Lua program.");
     ctx
+}
+
+/// Format a single generate-and-compile outcome as a one-line summary
+/// for `--verbose` and batch listings.
+pub fn format_outcome_line(idx: usize, o: &GenerateCompileOutcome) -> String {
+    match (&o.stage, &o.error) {
+        (Stage::Compiled, _) => format!(
+            "  [{idx:>3}] COMPILED  ({} ms, {} tok)",
+            o.latency_ms,
+            o.usage.total()
+        ),
+        (stage, Some(err)) => {
+            let first_line = err.lines().next().unwrap_or("").trim();
+            format!(
+                "  [{idx:>3}] {:<8}  ({} ms) — {}",
+                stage.label(),
+                o.latency_ms,
+                first_line
+            )
+        }
+        (stage, None) => format!("  [{idx:>3}] {:<8}  ({} ms)", stage.label(), o.latency_ms),
+    }
+}
+
+/// Render a stage histogram + sample-failures block for a batch of runs.
+pub fn format_histogram(hist: &StageHistogram, outcomes: &[GenerateCompileOutcome]) -> String {
+    let total = hist.total();
+    let mut out = String::new();
+    out.push_str(&format!(
+        "── Stage histogram (N={total}) ────────────────\n"
+    ));
+    let row = |label: &str, n: usize| -> String {
+        let pct = if total == 0 {
+            0.0
+        } else {
+            (n as f64 / total as f64) * 100.0
+        };
+        format!("  {label:<18} {n:>4}  ({pct:>5.1}%)\n")
+    };
+    out.push_str(&row("Generate failed:", hist.generate));
+    out.push_str(&row("Parse failed:", hist.parse));
+    out.push_str(&row("Compile failed:", hist.compile));
+    out.push_str(&row("Verify failed:", hist.verify));
+    out.push_str(&row("Compiled OK:", hist.compiled));
+
+    out.push_str("\n── Per-run outcomes ───────────────────────────\n");
+    for (idx, o) in outcomes.iter().enumerate() {
+        out.push_str(&format_outcome_line(idx + 1, o));
+        out.push('\n');
+    }
+
+    out
 }
 
 /// Format a byte count into a human-readable string with commas.
@@ -614,6 +801,114 @@ return 1"#;
             h,
             "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
+    }
+
+    // ── Stage + PipelineError::stage ─────────────────────────────────
+
+    #[test]
+    fn pipeline_error_stage_mapping() {
+        assert_eq!(PipelineError::Parse("x".into()).stage(), Stage::Parse);
+        assert_eq!(PipelineError::Compile("x".into()).stage(), Stage::Compile);
+        assert_eq!(PipelineError::Verify("x".into()).stage(), Stage::Verify);
+        assert_eq!(
+            PipelineError::Runtime("x".into(), VmError::GasExhausted).stage(),
+            Stage::Runtime
+        );
+    }
+
+    #[test]
+    fn stage_labels() {
+        assert_eq!(Stage::Generate.label(), "GENERATE");
+        assert_eq!(Stage::Parse.label(), "PARSE");
+        assert_eq!(Stage::Compile.label(), "COMPILE");
+        assert_eq!(Stage::Verify.label(), "VERIFY");
+        assert_eq!(Stage::Compiled.label(), "COMPILED");
+        assert_eq!(Stage::Runtime.label(), "RUNTIME");
+    }
+
+    // ── StageHistogram ───────────────────────────────────────────────
+
+    fn outcome(stage: Stage) -> GenerateCompileOutcome {
+        GenerateCompileOutcome {
+            stage,
+            error: if matches!(stage, Stage::Compiled) {
+                None
+            } else {
+                Some(format!("{stage} failed"))
+            },
+            source: Some("return 42".into()),
+            usage: crate::llm::TokenUsage::default(),
+            latency_ms: 10,
+        }
+    }
+
+    #[test]
+    fn histogram_counts_each_stage() {
+        let outcomes = vec![
+            outcome(Stage::Compiled),
+            outcome(Stage::Compiled),
+            outcome(Stage::Verify),
+            outcome(Stage::Compile),
+            outcome(Stage::Parse),
+            outcome(Stage::Generate),
+        ];
+        let h = StageHistogram::from_outcomes(&outcomes);
+        assert_eq!(h.compiled, 2);
+        assert_eq!(h.verify, 1);
+        assert_eq!(h.compile, 1);
+        assert_eq!(h.parse, 1);
+        assert_eq!(h.generate, 1);
+        assert_eq!(h.total(), 6);
+    }
+
+    #[test]
+    fn histogram_empty() {
+        let h = StageHistogram::from_outcomes(&[]);
+        assert_eq!(h.total(), 0);
+    }
+
+    #[test]
+    fn histogram_runtime_outcomes_ignored() {
+        // Runtime is not a terminal stage in generate-and-compile mode.
+        let outcomes = vec![outcome(Stage::Runtime), outcome(Stage::Compiled)];
+        let h = StageHistogram::from_outcomes(&outcomes);
+        assert_eq!(h.total(), 1);
+        assert_eq!(h.compiled, 1);
+    }
+
+    // ── format_histogram + format_outcome_line ───────────────────────
+
+    #[test]
+    fn format_outcome_line_compiled() {
+        let line = format_outcome_line(1, &outcome(Stage::Compiled));
+        assert!(line.contains("COMPILED"));
+        assert!(line.contains("[  1]"));
+    }
+
+    #[test]
+    fn format_outcome_line_failure_includes_first_error_line() {
+        let mut o = outcome(Stage::Verify);
+        o.error = Some("first line\nsecond line".into());
+        let line = format_outcome_line(2, &o);
+        assert!(line.contains("VERIFY"));
+        assert!(line.contains("first line"));
+        assert!(!line.contains("second line"));
+    }
+
+    #[test]
+    fn format_histogram_renders_all_rows() {
+        let outcomes = vec![
+            outcome(Stage::Compiled),
+            outcome(Stage::Compiled),
+            outcome(Stage::Verify),
+        ];
+        let h = StageHistogram::from_outcomes(&outcomes);
+        let s = format_histogram(&h, &outcomes);
+        assert!(s.contains("Stage histogram (N=3)"));
+        assert!(s.contains("Compiled OK:"));
+        assert!(s.contains("Verify failed:"));
+        assert!(s.contains("66.7%"));
+        assert!(s.contains("Per-run outcomes"));
     }
 
     #[test]

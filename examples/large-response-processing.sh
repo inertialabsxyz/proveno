@@ -1,4 +1,4 @@
-cargo run -p luai-orchestrator -- --prove --verbose --gas-limit 10000000 --max-tool-calls 16 \
+cargo run -p proveno-orchestrator -- --prove --verbose --gas-limit 10000000 --max-tool-calls 16 \
   "Analyze wallet 0x11E4857Bb9993a50c685A79AFad4E6F65D518DDa across 4 chains.
 
    For each chain, fetch 3 endpoints (12 calls total):

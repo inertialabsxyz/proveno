@@ -1,7 +1,7 @@
 # Canonical Serialization
 
 This document specifies the byte-exact encoding used to produce `policy_hash`
-and other hash commitments in luai. An independent implementation that follows
+and other hash commitments in proveno. An independent implementation that follows
 this specification will produce the same SHA-256 hashes for the same inputs.
 
 ---

@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 
-use luai::{
+use proveno::{
     bytecode,
     compiler::{self, proto::CompiledProgram},
     host::{canonicalize::canonical_serialize, transcript::ToolCallStatus},
@@ -377,7 +377,7 @@ fn format_number(n: u64) -> String {
 pub fn format_output(result: &PipelineResult) -> String {
     let mut out = String::new();
 
-    out.push_str("═══ luai execution report ═══\n\n");
+    out.push_str("═══ proveno execution report ═══\n\n");
 
     out.push_str(&format!("Task:     \"{}\"\n", result.task));
     out.push_str(&format!("Model:    {}\n", result.model));
@@ -519,7 +519,7 @@ return r.message"#;
         let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(
             output.return_value,
-            LuaValue::String(luai::types::value::LuaString::from_str("test"))
+            LuaValue::String(proveno::types::value::LuaString::from_str("test"))
         );
         assert_eq!(output.transcript.len(), 1);
         assert_eq!(output.transcript[0].tool_name, "echo");
@@ -542,7 +542,7 @@ return r.result"#;
         let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         assert_eq!(
             output.return_value,
-            LuaValue::String(luai::types::value::LuaString::from_str("HELLO"))
+            LuaValue::String(proveno::types::value::LuaString::from_str("HELLO"))
         );
     }
 
@@ -683,7 +683,7 @@ return r1.result + r2.result
         let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let result = make_result("return 42", output, 1);
         let formatted = format_output(&result);
-        assert!(formatted.contains("luai execution report"));
+        assert!(formatted.contains("proveno execution report"));
         assert!(formatted.contains("Task:     \"test task\""));
         assert!(formatted.contains("Model:    test-model"));
         assert!(formatted.contains("Attempts: 1"));

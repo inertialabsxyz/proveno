@@ -1,5 +1,5 @@
-use luai::compiler::{Constant, Instruction, compile};
-use luai::parser::parse;
+use proveno::compiler::{Constant, Instruction, compile};
+use proveno::parser::parse;
 
 /// Parse source, compile, and return the top-level function prototype.
 macro_rules! compile_src {
@@ -214,7 +214,7 @@ fn test_break_inside_while() {
 
 #[test]
 fn test_break_outside_loop() {
-    use luai::compiler::CompileError;
+    use proveno::compiler::CompileError;
     let err = compile_err!("break");
     assert!(matches!(err, CompileError::BreakOutsideLoop { .. }));
 }
@@ -235,7 +235,7 @@ fn test_tool_call() {
 
 #[test]
 fn test_tool_as_value_error() {
-    use luai::compiler::CompileError;
+    use proveno::compiler::CompileError;
     // local t = tool  → parser or compiler should reject
     // The parser already rejects `local t = tool`, so try a different form
     // that reaches the compiler.
@@ -367,7 +367,7 @@ fn test_constant_dedup() {
 
 #[test]
 fn test_too_many_locals() {
-    use luai::compiler::CompileError;
+    use proveno::compiler::CompileError;
     // Generate 201 local declarations.
     let src: String = (0..201)
         .map(|i| format!("local _v{} = {}\n", i, i))
@@ -507,7 +507,7 @@ fn test_or_short_circuit() {
 
 #[test]
 fn test_expr_stmt_not_call() {
-    use luai::compiler::CompileError;
+    use proveno::compiler::CompileError;
     // `1 + 2` as a statement (not a call) should fail.
     // The parser may or may not allow this; let's try.
     // Actually the parser enforces this too; let's use a name expression.
@@ -530,7 +530,7 @@ fn test_expr_stmt_not_call() {
 
 #[test]
 fn test_compile_error_codes() {
-    use luai::compiler::CompileError;
+    use proveno::compiler::CompileError;
     let errors: Vec<CompileError> = vec![
         CompileError::ToolAsValue { line: 1 },
         CompileError::IndirectToolCall { line: 1 },

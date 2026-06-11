@@ -1,6 +1,6 @@
 //! Integration tests for Phase 2: OraclePolicy enforcement and reproducibility.
 
-use luai::{
+use proveno::{
     bytecode::verify,
     compiler::compile,
     parser::parse,
@@ -70,7 +70,7 @@ fn run_with_policy(
     src: &str,
     host: MockHost,
     policy: OraclePolicy,
-) -> Result<luai::VmOutput, VmError> {
+) -> Result<proveno::VmOutput, VmError> {
     let block = parse(src).expect("parse failed");
     let program = compile(&block).expect("compile failed");
     verify(&program).expect("verify failed");

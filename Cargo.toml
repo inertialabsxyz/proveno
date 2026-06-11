@@ -1,10 +1,10 @@
 [package]
-name = "luai"
+name = "proveno"
 version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["compiler","orchestrator","prover","verifier","luai-noir"]
+members = ["compiler","orchestrator","prover","verifier","proveno-noir"]
 resolver = "2"
 
 [features]

@@ -1,6 +1,6 @@
 //! Integration tests for Phase 8: host boundary, transcript, canonical serialization.
 
-use luai::{
+use proveno::{
     OracleTape, TapeHost,
     bytecode::verify,
     compiler::compile,
@@ -62,7 +62,11 @@ fn strip_line_info(e: VmError) -> VmError {
     }
 }
 
-fn run_with_host(src: &str, host: MockHost, config: VmConfig) -> Result<luai::VmOutput, VmError> {
+fn run_with_host(
+    src: &str,
+    host: MockHost,
+    config: VmConfig,
+) -> Result<proveno::VmOutput, VmError> {
     let block = parse(src).expect("parse failed");
     let program = compile(&block).expect("compile failed");
     verify(&program).expect("verify failed");
@@ -366,7 +370,11 @@ fn gas_charged_for_tool_call() {
 
 // ── Tape replay helper ─────────────────────────────────────────────────────────
 
-fn run_with_tape(src: &str, tape: OracleTape, config: VmConfig) -> Result<luai::VmOutput, VmError> {
+fn run_with_tape(
+    src: &str,
+    tape: OracleTape,
+    config: VmConfig,
+) -> Result<proveno::VmOutput, VmError> {
     let block = parse(src).expect("parse failed");
     let program = compile(&block).expect("compile failed");
     verify(&program).expect("verify failed");

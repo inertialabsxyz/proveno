@@ -1,13 +1,13 @@
 use std::io;
 use std::path::Path;
 
-use luai::noir::encoder::NoirBytecode;
-use luai::noir::trace::TraceStep;
-use luai::tls::{TlsAttestationRecord, empty_tls_attestation_hash};
-use luai::types::value::LuaValue;
-use luai::vm::engine::VmOutput;
-use luai::zkvm::commitment::{hash_input, hash_output};
-use luai::{OracleTape, TapeEntry};
+use proveno::noir::encoder::NoirBytecode;
+use proveno::noir::trace::TraceStep;
+use proveno::tls::{TlsAttestationRecord, empty_tls_attestation_hash};
+use proveno::types::value::LuaValue;
+use proveno::vm::engine::VmOutput;
+use proveno::zkvm::commitment::{hash_input, hash_output};
+use proveno::{OracleTape, TapeEntry};
 
 pub const MAX_BYTECODE: usize = 512;
 pub const MAX_STEPS: usize = 2048;
@@ -281,11 +281,11 @@ fn rows_toml<'a>(rows: impl Iterator<Item = &'a [u8]>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use luai::compiler::compile;
-    use luai::noir::encoder::encode_program;
-    use luai::parser::parse;
-    use luai::types::value::LuaValue;
-    use luai::{NoopHost, OracleTape, Vm, VmConfig};
+    use proveno::compiler::compile;
+    use proveno::noir::encoder::encode_program;
+    use proveno::parser::parse;
+    use proveno::types::value::LuaValue;
+    use proveno::{NoopHost, OracleTape, Vm, VmConfig};
 
     fn run(src: &str) -> (NoirBytecode, VmOutput, i64) {
         let program = compile(&parse(src).unwrap()).unwrap();

@@ -1,4 +1,4 @@
-use luai::{
+use proveno::{
     HostInterface,
     types::{
         table::{LuaKey, LuaTable},

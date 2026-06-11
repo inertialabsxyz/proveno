@@ -1,7 +1,7 @@
 //! Integration tests: pipeline, determinism, gas/memory metering, pcall,
 //! iterators, VmOutput fields, and TLS attestation.
 
-use luai::{
+use proveno::{
     bytecode::verify,
     compiler::compile,
     parser::parse,
@@ -884,7 +884,7 @@ impl TlsCapturingHost {
         // Send a minimal HTTP/1.1 GET request.
         write!(
             tls,
-            "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: luai-test/1.0\r\n\r\n"
+            "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: proveno-test/1.0\r\n\r\n"
         )
         .map_err(|e| format!("write error: {e}"))?;
 
@@ -1021,7 +1021,7 @@ fn run_with_host<H: HostInterface>(
     src: &str,
     host: H,
     attestations: std::sync::Arc<std::sync::Mutex<Vec<TlsAttestationRecord>>>,
-) -> (luai::vm::engine::VmOutput, Vec<TlsAttestationRecord>) {
+) -> (proveno::vm::engine::VmOutput, Vec<TlsAttestationRecord>) {
     let block = parse(src).expect("parse failed");
     let program = compile(&block).expect("compile failed");
     verify(&program).expect("verify failed");
@@ -1074,7 +1074,7 @@ fn tls_attestation_nonzero_for_p256() {
     // Also verify end-to-end through `PublicInputs` (the full prove pipeline).
     #[cfg(feature = "zkvm")]
     {
-        use luai::{host::tape::OracleTape, zkvm::commitment::compute_public_inputs};
+        use proveno::{host::tape::OracleTape, zkvm::commitment::compute_public_inputs};
         let block = parse(src).expect("parse failed");
         let program = compile(&block).expect("compile failed");
         let oracle_tape = OracleTape::from_records(&output.transcript);
@@ -1121,7 +1121,7 @@ fn tls_degrades_cleanly_for_non_p256() {
     // Also verify end-to-end through `PublicInputs`.
     #[cfg(feature = "zkvm")]
     {
-        use luai::{host::tape::OracleTape, zkvm::commitment::compute_public_inputs};
+        use proveno::{host::tape::OracleTape, zkvm::commitment::compute_public_inputs};
         let block = parse(src).expect("parse failed");
         let program = compile(&block).expect("compile failed");
         let oracle_tape = OracleTape::from_records(&output.transcript);

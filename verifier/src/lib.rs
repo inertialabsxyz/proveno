@@ -1,9 +1,9 @@
-//! Standalone verifier library for luai ZK proofs.
+//! Standalone verifier library for proveno ZK proofs.
 //!
 //! # Proof wire format (v1)
 //!
 //! ```text
-//! [magic: 4]              b"luai"
+//! [magic: 4]              b"prvn"
 //! [version: 1]            0x01
 //! [program_hash: 32]
 //! [input_hash: 32]
@@ -25,11 +25,11 @@
 //   0xe401364e121c0805290b1f060a6ed9a8dc796f86c17ead7632f01e0c1ec24687
 // This value is deterministic: it is the SHA-256 of the canonical bytes of the
 // policy (allowed domains sorted, methods sorted, all fields serialised in a
-// fixed order).  Regenerate with: cargo run -p luai-verifier --bin policy-hash
-use luai::zkvm::commitment::PublicInputs;
+// fixed order).  Regenerate with: cargo run -p proveno-verifier --bin policy-hash
+use proveno::zkvm::commitment::PublicInputs;
 use sha2::{Digest, Sha256};
 
-const MAGIC: &[u8; 4] = b"luai";
+const MAGIC: &[u8; 4] = b"prvn";
 const VERSION: u8 = 0x01;
 // magic(4) + version(1) + 6×hash(192) + proof_blob_len(4)
 const HEADER_SIZE: usize = 4 + 1 + 32 * 6 + 4;
@@ -78,7 +78,7 @@ fn hex(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Verify a luai proof bundle.
+/// Verify a proveno proof bundle.
 ///
 /// Steps:
 /// 1. Parse and integrity-check the proof wire format.

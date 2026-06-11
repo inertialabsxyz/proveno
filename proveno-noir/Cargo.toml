@@ -1,0 +1,16 @@
+[package]
+name = "proveno-noir"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+proveno = { path = "..", features = ["zkvm", "serde"] }
+proveno_prover = { path = "../prover" }
+serde_json = "1"
+
+[dev-dependencies]
+proveno = { path = "..", features = ["zkvm"] }
+
+[[bin]]
+name = "proveno-noir-witness"
+path = "src/main.rs"

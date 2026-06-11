@@ -11,7 +11,7 @@ Step 1 (single agent):   Phase 1 — Full ISA Encoding
                               │
 Step 2 (single agent):   Phase 2 — VM Trace Emission
                               │
-Step 3 (single agent):   Phase 3 — Witness Pipeline + luai-noir Crate
+Step 3 (single agent):   Phase 3 — Witness Pipeline + proveno-noir Crate
                               │
 Step 4 (single agent):   Phase 4 — Oracle Tape Verification
                               │
@@ -31,11 +31,11 @@ Do not start any step until the previous step is merged to master. All phases ar
 
 **Prompt:**
 
-You are implementing Phase 1 of the luai Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 1 — Full ISA Encoding". Read that section carefully before writing any code.
+You are implementing Phase 1 of the proveno Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 1 — Full ISA Encoding". Read that section carefully before writing any code.
 
 ### Context
 
-luai is a deterministic sandboxed Lua VM. The full execution pipeline is complete:
+proveno is a deterministic sandboxed Lua VM. The full execution pipeline is complete:
 
 - `src/compiler/proto.rs` — `Instruction` enum with 46 variants (`Nop`, `PushK`, `PushNil`, `PushTrue`, `PushFalse`, `Pop`, `Dup`, `LoadLocal`, `StoreLocal`, `LoadUp`, `StoreUp`, `NewTable`, `GetTable`, `SetTable`, `GetField`, `SetField`, `Add`, `Sub`, `Mul`, `IDiv`, `Mod`, `Neg`, `Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`, `Not`, `And`, `Or`, `Concat`, `Len`, `Jmp`, `JmpIf`, `JmpIfNot`, `Call`, `Ret`, `Closure`, `ToolCall`, `PCall`, `Log`, `Error`, `IterInitSorted`, `IterInitArray`, `IterNext`). Operands are typed: `u8`, `u16`, or `i16` depending on the variant.
 - `src/vm/engine.rs` — `Vm` struct and execution loop. `VmConfig` controls gas limit, memory limit, call depth.
@@ -51,7 +51,7 @@ luai is a deterministic sandboxed Lua VM. The full execution pipeline is complet
 **Part A — Define the canonical opcode mapping** as specified in `planning/noir-proving-pipeline-plan.md` under "1a. Opcode mapping":
 
 1. Create `src/noir/mod.rs` exposing `pub mod opcodes; pub mod encoder;`.
-2. Create `src/noir/opcodes.rs`. Define `pub const` for every luai `Instruction` variant using the ID table in the spec (Nop=0 through IterNext=45). Define `pub fn instruction_to_opcode_id(i: &Instruction) -> u8` and `pub fn instruction_to_operand(i: &Instruction) -> i64` that convert any `Instruction` to its `(u8, i64)` pair. Add `pub mod noir;` to `src/lib.rs`.
+2. Create `src/noir/opcodes.rs`. Define `pub const` for every proveno `Instruction` variant using the ID table in the spec (Nop=0 through IterNext=45). Define `pub fn instruction_to_opcode_id(i: &Instruction) -> u8` and `pub fn instruction_to_operand(i: &Instruction) -> i64` that convert any `Instruction` to its `(u8, i64)` pair. Add `pub mod noir;` to `src/lib.rs`.
 3. Unit-test `instruction_to_opcode_id` and `instruction_to_operand` for every variant in a `#[cfg(test)]` block in `src/noir/opcodes.rs`.
 
 **Part B — Rust bytecode encoder** as specified under "1c. Rust bytecode encoder":
@@ -136,7 +136,7 @@ Do not implement Phase 2 or later content beyond the stubs listed above.
 
 **Prompt:**
 
-You are implementing Phase 2 of the luai Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 2 — VM Trace Emission". Read that section carefully before writing any code.
+You are implementing Phase 2 of the proveno Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 2 — VM Trace Emission". Read that section carefully before writing any code.
 
 ### Context
 
@@ -193,14 +193,14 @@ cargo test --test noir_trace
 
 ---
 
-## Step 3 — Phase 3: Witness Pipeline and `luai-noir` Crate
+## Step 3 — Phase 3: Witness Pipeline and `proveno-noir` Crate
 
 **Branch:** `noir/3-witness-pipeline`
 **Depends on:** Step 2 merged to master
 
 **Prompt:**
 
-You are implementing Phase 3 of the luai Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 3 — Witness Pipeline and `luai-noir` Crate". Read that section carefully before writing any code.
+You are implementing Phase 3 of the proveno Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 3 — Witness Pipeline and `proveno-noir` Crate". Read that section carefully before writing any code.
 
 ### Context
 
@@ -219,11 +219,11 @@ Phases 1 and 2 are complete:
 
 2. Remove the `EncodeError::CallNotSupported` variant from `src/noir/encoder.rs`. Update `encode_program` to encode `Call(36)`, `PCall(40)`, `Closure(38)` using the opcode IDs from the mapping. These were stubbed in Phase 1.
 
-**Part B — `luai-noir` crate**, as specified under "3b–3d":
+**Part B — `proveno-noir` crate**, as specified under "3b–3d":
 
-3. Create `luai-noir/` as a new workspace member. Add it to the root `Cargo.toml` `[workspace] members` array. Structure:
+3. Create `proveno-noir/` as a new workspace member. Add it to the root `Cargo.toml` `[workspace] members` array. Structure:
    ```
-   luai-noir/
+   proveno-noir/
    ├── Cargo.toml
    └── src/
        ├── lib.rs
@@ -294,7 +294,7 @@ Phases 1 and 2 are complete:
 
 **Part C — Tests**, as specified under "3e. Tests":
 
-6. Integration test in `luai-noir/tests/prove.rs` (skipped if nargo is absent — gate with `#[cfg(feature = "nargo_integration")]` or check for the binary at test start and skip):
+6. Integration test in `proveno-noir/tests/prove.rs` (skipped if nargo is absent — gate with `#[cfg(feature = "nargo_integration")]` or check for the binary at test start and skip):
    - `end_to_end_prove_and_verify` — compile `"return 1 + 2"`, execute with `record_trace: true`, build witness, prove, verify. Assert `verified == true`.
    - `tampered_return_value_fails_verify` — same flow but overwrite `witness.return_value` with a wrong value before calling `prove`. Assert that nargo verify fails or returns `false`.
    - `multi_function_proves_correctly` — compile a Lua program that calls a local function, prove and verify.
@@ -312,11 +312,11 @@ Phases 1 and 2 are complete:
 cargo test
 # → all tests pass
 
-cargo build -p luai-noir
+cargo build -p proveno-noir
 # → compiles without warnings
 
 # If nargo is installed:
-cargo test -p luai-noir --features nargo_integration
+cargo test -p proveno-noir --features nargo_integration
 # → test end_to_end_prove_and_verify ... ok
 # → test tampered_return_value_fails_verify ... ok
 # → test multi_function_proves_correctly ... ok
@@ -331,7 +331,7 @@ cargo test -p luai-noir --features nargo_integration
 
 **Prompt:**
 
-You are implementing Phase 4 of the luai Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 4 — Oracle Tape Verification". Read that section carefully before writing any code.
+You are implementing Phase 4 of the proveno Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 4 — Oracle Tape Verification". Read that section carefully before writing any code.
 
 ### Context
 
@@ -339,7 +339,7 @@ Phases 1–3 are complete:
 
 - Phase 1: `src/noir/opcodes.rs` — opcode IDs. `src/noir/encoder.rs` — `encode_program`. `noir/src/main.nr` — circuit for 46 opcodes.
 - Phase 2: `src/noir/trace.rs` — `TraceStep`. `VmOutput.trace: Vec<TraceStep>`.
-- Phase 3: `luai-noir/` crate — `NoirWitness`, `build_witness`, `write_prover_toml`, `NoirProver { prove, verify }`, `NoirPublicInputs { program_hash, return_value, num_steps }`.
+- Phase 3: `proveno-noir/` crate — `NoirWitness`, `build_witness`, `write_prover_toml`, `NoirProver { prove, verify }`, `NoirPublicInputs { program_hash, return_value, num_steps }`.
 
 Relevant existing types:
 - `src/host/tape.rs` — `OracleTape { entries: Vec<TapeEntry> }`, `TapeEntry::Ok(Vec<u8>)` / `TapeEntry::Err(String)`, `OracleTape::from_records(&[ToolCallRecord]) -> OracleTape`, `OracleTape::commitment_hash() -> [u8; 32]`. The commitment framing is: for each entry, `tag (1 byte: 0x00=Ok, 0x01=Err) || length (4 bytes LE) || payload`.
@@ -371,7 +371,7 @@ Relevant existing types:
 
 **Part B — Witness changes**, as specified under "4b–4c":
 
-3. Add to `NoirWitness` in `luai-noir/src/witness.rs`:
+3. Add to `NoirWitness` in `proveno-noir/src/witness.rs`:
    ```rust
    pub tape_entry_tags:    [u8;  MAX_TOOL_CALLS],
    pub tape_entry_lengths: [u32; MAX_TOOL_CALLS],
@@ -382,13 +382,13 @@ Relevant existing types:
 
 4. Update `build_witness` to accept `oracle_tape: &OracleTape`. Extract each `TapeEntry`, populate the new arrays (truncate payload to `MAX_TAPE_ENTRY_BYTES`, zero-pad if shorter), set `num_tool_calls`, and populate `tool_responses_hash` using `oracle_tape.commitment_hash()`.
 
-5. Add `tool_responses_hash: [u8; 32]` to `NoirPublicInputs` in `luai-noir/src/prover.rs`.
+5. Add `tool_responses_hash: [u8; 32]` to `NoirPublicInputs` in `proveno-noir/src/prover.rs`.
 
 6. Update `write_prover_toml` to serialise the new fields. `tape_entry_data` is a 2D array — write it as a TOML array of inline arrays.
 
 **Part C — Tests**, as specified under "4d. Tests":
 
-7. Add to `luai-noir/tests/prove.rs` (same nargo-gating as Step 3):
+7. Add to `proveno-noir/tests/prove.rs` (same nargo-gating as Step 3):
    - `prove_with_tool_calls` — compile and execute a Lua program that calls `tool.call("kv_get", {})` at least once. Build witness from the resulting oracle tape. Prove and verify. Assert `tool_responses_hash != [0u8; 32]`.
    - `tampered_tape_entry_fails_verify` — same flow, then overwrite one byte in `witness.tape_entry_data[0]`. Assert verify fails.
    - `no_tool_calls_zero_hash` — a program with no tool calls produces `tool_responses_hash == sha256_of_empty`.
@@ -411,7 +411,7 @@ nargo check --program-dir noir
 # → no errors
 
 # If nargo is installed:
-cargo test -p luai-noir --features nargo_integration
+cargo test -p proveno-noir --features nargo_integration
 # → test prove_with_tool_calls ... ok
 # → test tampered_tape_entry_fails_verify ... ok
 # → test no_tool_calls_zero_hash ... ok
@@ -426,7 +426,7 @@ cargo test -p luai-noir --features nargo_integration
 
 **Prompt:**
 
-You are implementing Phase 5 of the luai Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 5 — Full Public Inputs Parity". Read that section carefully before writing any code.
+You are implementing Phase 5 of the proveno Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 5 — Full Public Inputs Parity". Read that section carefully before writing any code.
 
 ### Context
 
@@ -465,9 +465,9 @@ Relevant existing code:
    ```
    In the circuit: for each cert `i < num_certs`, call `std::ecdsa_secp256r1::verify_signature(cert_public_key_x[i], cert_public_key_y[i], cert_signatures[i], cert_msg_hashes[i])` and assert it returns `true`. Accumulate a SHA-256 over the cert public keys in order and assert the result equals `tls_attestation_hash`. When `num_certs == 0`, assert `tls_attestation_hash == [0u8; 32]`.
 
-**Part B — Expand `NoirPublicInputs` and witness** (`luai-noir/`):
+**Part B — Expand `NoirPublicInputs` and witness** (`proveno-noir/`):
 
-3. Replace `NoirPublicInputs` in `luai-noir/src/prover.rs` with the full six-hash struct matching `src/zkvm/commitment.rs`:
+3. Replace `NoirPublicInputs` in `proveno-noir/src/prover.rs` with the full six-hash struct matching `src/zkvm/commitment.rs`:
    ```rust
    pub struct NoirPublicInputs {
        pub program_hash:         [u8; 32],
@@ -479,7 +479,7 @@ Relevant existing code:
    }
    ```
 
-4. Add TLS witness fields to `NoirWitness` in `luai-noir/src/witness.rs`:
+4. Add TLS witness fields to `NoirWitness` in `proveno-noir/src/witness.rs`:
    ```rust
    pub cert_public_key_x: [[u8; 32]; MAX_CERTS],
    pub cert_public_key_y: [[u8; 32]; MAX_CERTS],
@@ -494,7 +494,7 @@ Relevant existing code:
 
 **Part C — Parity test**, as specified under "5e. Tests":
 
-7. Add a test in `tests/integration.rs` or `luai-noir/tests/parity.rs`:
+7. Add a test in `tests/integration.rs` or `proveno-noir/tests/parity.rs`:
    - `noir_and_openvm_produce_identical_public_inputs` — run the same Lua program through both the existing `compute_public_inputs` (OpenVM path) and `build_witness` + `NoirPublicInputs` (Noir path). Assert all six hashes are identical.
 
 ### Do Not Touch
@@ -517,7 +517,7 @@ cargo test --test parity
 # → test noir_and_openvm_produce_identical_public_inputs ... ok
 
 # If nargo is installed:
-cargo test -p luai-noir --features nargo_integration
+cargo test -p proveno-noir --features nargo_integration
 # → all prior tests still pass
 ```
 
@@ -530,7 +530,7 @@ cargo test -p luai-noir --features nargo_integration
 
 **Prompt:**
 
-You are implementing Phase 6 of the luai Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 6 — On-Chain Verifier". Read that section carefully before writing any code.
+You are implementing Phase 6 of the proveno Noir proving pipeline. The full specification is in `planning/noir-proving-pipeline-plan.md` under "Phase 6 — On-Chain Verifier". Read that section carefully before writing any code.
 
 ### Context
 
@@ -552,7 +552,7 @@ Phases 1–5 are complete. The Noir proof now produces the same six-hash `NoirPu
 
 **Part B — Public inputs encoding**, as specified under "6b. Public inputs encoding":
 
-3. The Solidity verifier's `verify` function takes `bytes32[] calldata publicInputs`. Document and implement the canonical ordering in `luai-noir/src/prover.rs` as:
+3. The Solidity verifier's `verify` function takes `bytes32[] calldata publicInputs`. Document and implement the canonical ordering in `proveno-noir/src/prover.rs` as:
    ```rust
    pub fn public_inputs_to_bytes32_array(pi: &NoirPublicInputs) -> Vec<[u8; 32]> {
        vec![
@@ -569,7 +569,7 @@ Phases 1–5 are complete. The Noir proof now produces the same six-hash `NoirPu
 
 **Part C — Wire into existing contracts**, as specified under "6c. Integration with existing contracts":
 
-4. In `contracts/`, add or update a Solidity contract `LuaiNoirVerifier.sol` that wraps `plonk_vk.sol`. It must expose:
+4. In `contracts/`, add or update a Solidity contract `ProvenoNoirVerifier.sol` that wraps `plonk_vk.sol`. It must expose:
    ```solidity
    function verifyExecution(
        bytes calldata proof,
@@ -588,7 +588,7 @@ Phases 1–5 are complete. The Noir proof now produces the same six-hash `NoirPu
 **Part D — Tests**, as specified under "6d. Tests":
 
 6. Add a Foundry or Hardhat test in `contracts/test/` (use whichever framework is already in the repo, or Foundry if none exists):
-   - `testVerifyValidProof` — generate a real Noir proof via `luai-noir`, pass it to `LuaiNoirVerifier.verifyExecution`, assert it returns `true`.
+   - `testVerifyValidProof` — generate a real Noir proof via `proveno-noir`, pass it to `ProvenoNoirVerifier.verifyExecution`, assert it returns `true`.
    - `testVerifyTamperedProofFails` — flip a byte in the proof, assert returns `false`.
    - `testVerifyWrongPolicyHashFails` — pass the correct proof with a wrong `policyHash`, assert returns `false`.
    - Record gas used by `verifyExecution` in the test output.
@@ -598,7 +598,7 @@ Phases 1–5 are complete. The Noir proof now produces the same six-hash `NoirPu
 - `openvm/` — do not modify; the OpenVM pipeline continues to coexist
 - `prover/` — do not modify
 - `src/` — do not modify Rust source in this phase
-- Existing contracts that are not the new `LuaiNoirVerifier.sol`
+- Existing contracts that are not the new `ProvenoNoirVerifier.sol`
 
 ### Verification
 
@@ -613,7 +613,7 @@ ls noir/contract/plonk_vk.sol
 # → file exists
 
 # If Foundry is available:
-forge test --match-path contracts/test/LuaiNoirVerifier.t.sol -v
+forge test --match-path contracts/test/ProvenoNoirVerifier.t.sol -v
 # → testVerifyValidProof ... [PASS]
 # → testVerifyTamperedProofFails ... [PASS]
 # → testVerifyWrongPolicyHashFails ... [PASS]

@@ -1,10 +1,10 @@
-use luai::compiler::compile;
-use luai::noir::encoder::encode_program;
-use luai::parser::parse;
-use luai::types::value::LuaValue;
-use luai::zkvm::commitment::compute_public_inputs;
-use luai::{NoopHost, OracleTape, Vm, VmConfig};
-use luai_noir::witness::build_witness;
+use proveno::compiler::compile;
+use proveno::noir::encoder::encode_program;
+use proveno::parser::parse;
+use proveno::types::value::LuaValue;
+use proveno::zkvm::commitment::compute_public_inputs;
+use proveno::{NoopHost, OracleTape, Vm, VmConfig};
+use proveno_noir::witness::build_witness;
 
 #[test]
 fn noir_and_openvm_produce_identical_public_inputs() {

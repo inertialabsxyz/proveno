@@ -1,5 +1,5 @@
-use luai::zkvm::commitment::PublicInputs;
-use luai_verifier::{VerifyError, build_test_proof, verify_proof};
+use proveno::zkvm::commitment::PublicInputs;
+use proveno_verifier::{VerifyError, build_test_proof, verify_proof};
 
 fn make_public_inputs(policy_hash: [u8; 32]) -> PublicInputs {
     PublicInputs {

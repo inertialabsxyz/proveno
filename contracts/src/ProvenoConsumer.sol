@@ -1,27 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {LuaiVerifier} from "./LuaiVerifier.sol";
+import {ProvenoVerifier} from "./ProvenoVerifier.sol";
 import {PublicInputs} from "./Types.sol";
 
 /// @notice Example consumer that decodes and stores a price-feed payload after
-/// the luai proof and the payload commitment both verify on-chain.
-contract LuaiConsumer {
+/// the proveno proof and the payload commitment both verify on-chain.
+contract ProvenoConsumer {
     error OutputPayloadMismatch();
 
     event PriceUpdated(uint256 price, uint8 sourcesUsed, uint64 blockTimestamp);
 
-    LuaiVerifier public immutable luaiVerifier;
+    ProvenoVerifier public immutable provenoVerifier;
 
     uint256 public lastPrice;
     uint8   public lastSourcesUsed;
     uint64  public lastBlockTimestamp;
 
-    constructor(address _luaiVerifier) {
-        luaiVerifier = LuaiVerifier(_luaiVerifier);
+    constructor(address _provenoVerifier) {
+        provenoVerifier = ProvenoVerifier(_provenoVerifier);
     }
 
-    /// @notice Verify a luai proof, then decode and store the asserted price-feed
+    /// @notice Verify a proveno proof, then decode and store the asserted price-feed
     /// payload.
     ///
     /// @dev `outputPayload` must abi-decode as `(uint256 price, uint8 sourcesUsed,
@@ -41,7 +41,7 @@ contract LuaiConsumer {
         PublicInputs calldata inputs,
         bytes calldata outputPayload
     ) external {
-        luaiVerifier.verify(proof, inputs);
+        provenoVerifier.verify(proof, inputs);
 
         if (keccak256(outputPayload) != inputs.outputHash) revert OutputPayloadMismatch();
 

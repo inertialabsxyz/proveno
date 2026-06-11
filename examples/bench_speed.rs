@@ -1,4 +1,4 @@
-use luai::{
+use proveno::{
     bytecode::verify,
     compiler::compile,
     parser::parse,
@@ -38,7 +38,7 @@ fn run_bench(name: &str, src: &str, iters: u32) {
 }
 
 fn main() {
-    println!("=== luai (Rust) ===");
+    println!("=== proveno (Rust) ===");
 
     run_bench(
         "loop-100k",

@@ -1,6 +1,6 @@
-# luai Contracts
+# Proveno Contracts
 
-Solidity contracts for verifying luai Noir UltraHonk proofs on-chain and
+Solidity contracts for verifying Proveno Noir UltraHonk proofs on-chain and
 consuming their outputs.
 
 ## Contracts
@@ -9,8 +9,8 @@ consuming their outputs.
 |---|---|
 | `src/HonkVerifier.sol` | UltraHonk verifier generated from the Noir VK by `bb write_solidity_verifier` |
 | `src/Types.sol` | `PublicInputs` struct + `PublicInputsLib.pack` (wire-format expansion) |
-| `src/LuaiVerifier.sol` | Enforces `policyHash` and forwards the proof + packed public inputs to `HonkVerifier` |
-| `src/LuaiConsumer.sol` | Example consumer: verifies, then asserts `keccak256(outputPayload) == outputHash`, then decodes a price-feed payload |
+| `src/ProvenoVerifier.sol` | Enforces `policyHash` and forwards the proof + packed public inputs to `HonkVerifier` |
+| `src/ProvenoConsumer.sol` | Example consumer: verifies, then asserts `keccak256(outputPayload) == outputHash`, then decodes a price-feed payload |
 
 ## Regenerating `HonkVerifier.sol`
 
@@ -81,7 +81,7 @@ verifier. After such a change you **must** do all three of the following:
    bb write_solidity_verifier -k noir/target/vk -o contracts/src/HonkVerifier.sol -t evm
    ```
 2. Update `PublicInputs` in `src/Types.sol` to match the new declaration order
-   (field-for-field) and bump `LUAI_PUBLIC_INPUTS_LENGTH` if the wire-format
+   (field-for-field) and bump `PROVENO_PUBLIC_INPUTS_LENGTH` if the wire-format
    total changed.
 3. Update `PublicInputsLib.pack` so each scalar / `[u8; 32]` field is written
    into the `bytes32[]` at the same offset that `bb prove -t evm` produces.
@@ -92,7 +92,7 @@ The Rust-side `bytes32[]` ordering in `orchestrator/src/prove.rs`
 
 ## Output payload schema
 
-`LuaiConsumer.consumeResult` expects `outputPayload` to be:
+`ProvenoConsumer.consumeResult` expects `outputPayload` to be:
 
 ```solidity
 abi.encode(uint256 price, uint8 sourcesUsed, uint64 blockTimestamp)

@@ -4,8 +4,8 @@ pragma solidity ^0.8.24;
 import {Script, console} from "forge-std/Script.sol";
 
 import {HonkVerifier} from "../src/HonkVerifier.sol";
-import {LuaiConsumer} from "../src/LuaiConsumer.sol";
-import {LuaiVerifier} from "../src/LuaiVerifier.sol";
+import {ProvenoConsumer} from "../src/ProvenoConsumer.sol";
+import {ProvenoVerifier} from "../src/ProvenoVerifier.sol";
 
 contract Deploy is Script {
     function run() external {
@@ -14,13 +14,13 @@ contract Deploy is Script {
         vm.startBroadcast();
 
         HonkVerifier honk = new HonkVerifier();
-        LuaiVerifier luaiVerifier = new LuaiVerifier(policyHash, address(honk));
-        LuaiConsumer consumer = new LuaiConsumer(address(luaiVerifier));
+        ProvenoVerifier provenoVerifier = new ProvenoVerifier(policyHash, address(honk));
+        ProvenoConsumer consumer = new ProvenoConsumer(address(provenoVerifier));
 
         vm.stopBroadcast();
 
         console.log("HonkVerifier:", address(honk));
-        console.log("LuaiVerifier:", address(luaiVerifier));
-        console.log("LuaiConsumer:", address(consumer));
+        console.log("ProvenoVerifier:", address(provenoVerifier));
+        console.log("ProvenoConsumer:", address(consumer));
     }
 }

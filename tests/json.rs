@@ -4,7 +4,7 @@
 //! cover: encode/decode correctness, agent-workflow patterns, roundtrips,
 //! error recovery via pcall, and gas/memory accounting.
 
-use luai::{
+use proveno::{
     bytecode::verify,
     compiler::compile,
     parser::parse,

@@ -1660,75 +1660,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
-name = "luai"
-version = "0.1.0"
-dependencies = [
- "acir",
- "bn254_blackbox_solver",
- "p256 0.13.2",
- "p384",
- "rsa",
- "rustls",
- "serde",
- "serde_json",
- "sha2",
- "webpki-roots 0.26.11",
- "x509-cert",
-]
-
-[[package]]
-name = "luai-compiler"
-version = "0.1.0"
-dependencies = [
- "luai",
- "serde_json",
-]
-
-[[package]]
-name = "luai-noir"
-version = "0.1.0"
-dependencies = [
- "luai",
- "luai_prover",
- "serde_json",
-]
-
-[[package]]
-name = "luai-orchestrator"
-version = "0.1.0"
-dependencies = [
- "clap",
- "dotenvy",
- "luai",
- "luai-noir",
- "luai-verifier",
- "luai_prover",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
-]
-
-[[package]]
-name = "luai-verifier"
-version = "0.1.0"
-dependencies = [
- "luai",
- "sha2",
-]
-
-[[package]]
-name = "luai_prover"
-version = "0.1.0"
-dependencies = [
- "luai",
- "reqwest",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "mach2"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2038,6 +1969,75 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "proveno"
+version = "0.1.0"
+dependencies = [
+ "acir",
+ "bn254_blackbox_solver",
+ "p256 0.13.2",
+ "p384",
+ "rsa",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "webpki-roots 0.26.11",
+ "x509-cert",
+]
+
+[[package]]
+name = "proveno-compiler"
+version = "0.1.0"
+dependencies = [
+ "proveno",
+ "serde_json",
+]
+
+[[package]]
+name = "proveno-noir"
+version = "0.1.0"
+dependencies = [
+ "proveno",
+ "proveno_prover",
+ "serde_json",
+]
+
+[[package]]
+name = "proveno-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dotenvy",
+ "proveno",
+ "proveno-noir",
+ "proveno-verifier",
+ "proveno_prover",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "proveno-verifier"
+version = "0.1.0"
+dependencies = [
+ "proveno",
+ "sha2",
+]
+
+[[package]]
+name = "proveno_prover"
+version = "0.1.0"
+dependencies = [
+ "proveno",
+ "reqwest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -1,8 +1,8 @@
 """
-LangChain equivalent of the luai wallet scoring demo.
+LangChain equivalent of the proveno wallet scoring demo.
 
 Compares token usage between a traditional ReAct agent loop
-and luai's single-shot program generation approach.
+and proveno's single-shot program generation approach.
 
 Usage:
     pip install langchain langchain-anthropic langgraph requests python-dotenv

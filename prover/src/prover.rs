@@ -1,6 +1,6 @@
 //! `Prover` — dry-run and proof generation for Lua agent executions.
 
-use luai::{
+use proveno::{
     compiler::proto::CompiledProgram,
     host::tape::OracleTape,
     policy::OraclePolicy,
@@ -13,7 +13,7 @@ use luai::{
     },
 };
 
-pub use luai::zkvm::dry_run_result::DryRunResult;
+pub use proveno::zkvm::dry_run_result::DryRunResult;
 
 /// Executes Lua programs and (optionally) proves executions in the zkVM.
 pub struct Prover<H: HostInterface> {
@@ -45,7 +45,7 @@ impl<H: HostInterface> Prover<H> {
         program: &CompiledProgram,
         input: LuaValue,
         tls_attestations: Vec<TlsAttestationRecord>,
-    ) -> Result<DryRunResult, luai::VmError> {
+    ) -> Result<DryRunResult, proveno::VmError> {
         let mut vm = Vm::new(self.config.clone(), self.host);
         let output = vm.execute(program, input.clone())?;
 
@@ -76,7 +76,7 @@ impl<H: HostInterface> Prover<H> {
         input: LuaValue,
         tls_attestations: Vec<TlsAttestationRecord>,
         policy: &OraclePolicy,
-    ) -> Result<DryRunResult, luai::VmError> {
+    ) -> Result<DryRunResult, proveno::VmError> {
         let mut vm = Vm::new_with_policy(self.config.clone(), self.host, policy.clone());
         let output = vm.execute(program, input.clone())?;
 
@@ -119,7 +119,7 @@ impl<H: HostInterface> Prover<H> {
 mod tests {
     use super::*;
     use crate::host::ProverHost;
-    use luai::{compiler, parser, policy::profiles::constrained_http_v1};
+    use proveno::{compiler, parser, policy::profiles::constrained_http_v1};
 
     #[test]
     fn dry_run_with_policy_sets_policy_hash() {

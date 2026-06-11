@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @notice Public inputs produced by the luai Noir circuit, in declaration order.
+/// @notice Public inputs produced by the proveno Noir circuit, in declaration order.
 /// @dev Field ordering MUST match the `pub` declarations in `noir/src/main.nr`
 ///      exactly. The `pack` helper relies on this ordering to produce the
 ///      `bytes32[]` that the generated `HonkVerifier.verify` consumes.
@@ -17,9 +17,9 @@ struct PublicInputs {
 }
 
 // Total wire-format public-input count produced by `bb prove -t evm` for the
-// luai Noir circuit. Two scalars (`numSteps`, `returnValue`) plus six 32-byte
+// proveno Noir circuit. Two scalars (`numSteps`, `returnValue`) plus six 32-byte
 // hashes byte-expanded to 32 wire elements each: 1 + 32 + 1 + 6 * 32 = 194.
-uint256 constant LUAI_PUBLIC_INPUTS_LENGTH = 194;
+uint256 constant PROVENO_PUBLIC_INPUTS_LENGTH = 194;
 
 /// @notice Pack a `PublicInputs` struct into the wire-format `bytes32[]` that
 /// the generated `HonkVerifier.verify(bytes,bytes32[])` consumes.
@@ -43,7 +43,7 @@ library PublicInputsLib {
         pure
         returns (bytes32[] memory packed)
     {
-        packed = new bytes32[](LUAI_PUBLIC_INPUTS_LENGTH);
+        packed = new bytes32[](PROVENO_PUBLIC_INPUTS_LENGTH);
         uint256 i;
 
         packed[0] = bytes32(uint256(pi.numSteps));

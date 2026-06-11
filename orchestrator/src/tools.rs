@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use luai::{
+use proveno::{
     types::{
         table::{LuaKey, LuaTable},
         value::{LuaString, LuaValue},

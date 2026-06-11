@@ -1,8 +1,8 @@
 [package]
-name = "luai-compiler"
+name = "proveno-compiler"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-luai = {path = "../", features=["serde"]}
+proveno = {path = "../", features=["serde"]}
 serde_json = "1"

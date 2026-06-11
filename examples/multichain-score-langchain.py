@@ -1,6 +1,6 @@
 """
 LangChain multi-chain wallet scoring — 8 API calls.
-Compare token usage against luai's single-shot approach.
+Compare token usage against proveno's single-shot approach.
 
 Usage:
     pip install -r requirements.txt

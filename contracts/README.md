@@ -1,6 +1,6 @@
-# proveno Contracts
+# Proveno Contracts
 
-Solidity contracts for verifying proveno Noir UltraHonk proofs on-chain and
+Solidity contracts for verifying Proveno Noir UltraHonk proofs on-chain and
 consuming their outputs.
 
 ## Contracts

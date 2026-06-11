@@ -1,8 +1,48 @@
-# proveno
+# Proveno
 
-A deterministic, sandboxed Lua virtual machine for agentic workloads.
+**A programmable oracle: turn a simple program into a verifiable one.**
 
-Scripts run as single-shot programs: they receive an input object, may invoke host-provided tools, and return a structured result. Given the same bytecode, inputs, and tool responses, execution is always identical — making transcripts verifiable and zk-provable.
+You write straightforward logic in Lua. Proveno executes it deterministically
+off-chain, produces a zero-knowledge proof that *this exact program ran over
+these exact inputs and produced this exact output*, and a smart contract verifies
+that proof on-chain before acting on the result.
+
+Seen through an infrastructure lens, that is a **programmable oracle**: instead of
+trusting an operator or a committee to report a value, a contract trusts a *proof*
+that a known computation was performed correctly. The operator becomes
+interchangeable — anyone running the same program over the same inputs produces the
+same proof. The oracle isn't a fixed feed; it's **any deterministic computation you
+can express**, made verifiable.
+
+Under the hood it is a from-scratch, deterministic, sandboxed Lua VM. Programs run
+as single-shot computations: they receive an input object, may invoke host-provided
+tools, and return a structured result. Given the same bytecode, inputs, and tool
+responses, execution is always identical — that determinism is the precondition for
+provability.
+
+## The honest boundary
+
+A proof of correct execution is **not** a proof that the inputs were authentic.
+Proveno today proves:
+
+> *"The agreed program ran correctly over the inputs it was given, and produced
+> this output."*
+
+It does **not** yet prove:
+
+> *"Those inputs are the real data from the real source."*
+
+That second property — **data provenance** — is the hard half of the oracle
+problem. The computation-integrity half is real and useful on its own (verifiable
+custom aggregation over *signed* inputs already composes cleanly with first-party
+oracles). Closing the provenance gap is the roadmap: **verifiable sourcing** via TLS
+attestation / zkTLS inside the VM's tool-call boundary, so a proof can attest to
+both *"computed correctly"* and *"over data that genuinely came from source X."*
+See `docs/tls-attestation.md` for the current attestation work.
+
+Proveno is **complementary** to Chainlink/Pyth-style oracles, not a replacement: it
+adds a programmable, proven-computation layer between raw (ideally signed) data and
+on-chain action.
 
 ## Key properties
 
@@ -103,7 +143,9 @@ encoding-bridge caveat between `outputHash` (SHA-256) and the consumer's
 
 ## Orchestrator
 
-The orchestrator connects an LLM (Claude) to the proveno VM, forming an agentic pipeline:
+The orchestrator is one consumer of the oracle: it connects an LLM (Claude) to the
+Proveno VM so a natural-language task becomes a proven computation. The LLM authors
+the program; Proveno makes the result verifiable.
 
 1. User provides a natural-language task
 2. The LLM generates a Lua program to accomplish it
@@ -172,7 +214,7 @@ A third party can verify the proof without trusting the executor. The execution 
 
 ### Benchmarks: proveno vs LangChain ReAct
 
-proveno generates a complete program in a single LLM call, then executes it in the VM at zero token cost. Traditional agent frameworks like LangChain use a ReAct loop where each tool call is a round-trip through the LLM, with the full conversation history growing at each step.
+Proveno generates a complete program in a single LLM call, then executes it in the VM at zero token cost. Traditional agent frameworks like LangChain use a ReAct loop where each tool call is a round-trip through the LLM, with the full conversation history growing at each step.
 
 **Task: Onchain wallet reputation scoring (2 API calls)**
 
@@ -203,9 +245,9 @@ At 8 API calls, LangChain uses **1.55x** more tokens. The gap widens with task c
 | Output tokens | 1,197 | 1,841 |
 | **Total tokens** | **2,825** | **28,556** |
 
-At 12 API calls with larger payloads (ERC-20 token lists at ~5-25KB each), LangChain uses **10.1x** more tokens. The API response data accumulates in LangChain's conversation context — 69KB of JSON becomes ~26K input tokens on the second LLM call. proveno processes all of it in the VM at zero token cost.
+At 12 API calls with larger payloads (ERC-20 token lists at ~5-25KB each), LangChain uses **10.1x** more tokens. The API response data accumulates in LangChain's conversation context — 69KB of JSON becomes ~26K input tokens on the second LLM call. Proveno processes all of it in the VM at zero token cost.
 
-Beyond token efficiency, proveno produces a cryptographic proof of correct execution. LangChain produces an answer — proveno produces an answer anyone can verify.
+Beyond token efficiency, Proveno produces a cryptographic proof of correct execution. LangChain produces an answer — Proveno produces an answer anyone can verify.
 
 Benchmark scripts are in `examples/`:
 - `examples/score-wallet.sh` — single-chain scoring (proveno)

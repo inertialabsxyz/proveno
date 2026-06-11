@@ -1,4 +1,4 @@
-# proveno test fixtures
+# Proveno test fixtures
 
 Real UltraHonk proof + public inputs over a tiny Lua program (`return 42`),
 plus a representative `outputPayload` for the consumer-decode tests.

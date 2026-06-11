@@ -1,4 +1,4 @@
-# luai — MVP Roadmap
+# proveno — MVP Roadmap
 
 **Status:** Draft Revision
 **Created:** 2026-03-26
@@ -16,7 +16,7 @@ The MVP is:
 
 > A constrained programmable oracle that accepts a plain-English task within an approved policy, fetches real HTTPS data from approved sources, executes a deterministic computation, produces a proof with data provenance, and verifies that proof on-chain.
 
-For MVP, luai only needs to be good at one narrow but real category of jobs:
+For MVP, proveno only needs to be good at one narrow but real category of jobs:
 
 - multi-source HTTPS data fetch
 - deterministic JSON extraction/transformation
@@ -46,23 +46,23 @@ Every existing oracle approach requires trusting some party or mechanism:
 - **Optimistic oracles (UMA):** correct results are assumed unless challenged within a window. Fast, but requires the liveness of honest disputers and introduces settlement delay.
 - **Custom multisig:** pure economic and reputational security over N-of-M signers.
 
-### What luai Offers That None of These Do
+### What proveno Offers That None of These Do
 
 **1. The transformation logic is part of the commitment.**
 Not just "what is the price" but "what is the output of this exact program on this exact data." The on-chain consumer can read the Lua source, audit it, and pin their contract to a `policy_hash` that commits to that logic. No other oracle product makes the computation itself a first-class, verifiable artifact.
 
 **2. Policy enforcement is cryptographic, not reputational.**
-A contract that enforces `policy_hash == 0xABC...` rejects any proof that does not match — including proofs from a compromised executor, a malicious luai deployment, or a future version of the policy. The protocol does not have to trust luai as an ongoing operator. They trust the math.
+A contract that enforces `policy_hash == 0xABC...` rejects any proof that does not match — including proofs from a compromised executor, a malicious proveno deployment, or a future version of the policy. The protocol does not have to trust proveno as an ongoing operator. They trust the math.
 
 **3. Programmability without surrendering verifiability.**
-Existing oracles offer either a fixed feed (Chainlink price feed) or a flexible but unverified computation. luai's claim is: you get custom aggregation logic — average N sources, check deviation bounds, apply normalization — with the same proof-backed guarantees as a fixed feed.
+Existing oracles offer either a fixed feed (Chainlink price feed) or a flexible but unverified computation. proveno's claim is: you get custom aggregation logic — average N sources, check deviation bounds, apply normalization — with the same proof-backed guarantees as a fixed feed.
 
 **4. Data provenance alongside computation.**
 TLS attestation — where supported — binds the data to its source at the transport level. You are not just proving the computation was correct on claimed data; you are proving the data came from the claimed server. No other programmable oracle does this.
 
 ### The Strongest Version of the Value Proposition
 
-A DeFi protocol can encode "I will only accept results computed by this logic, from these sources, under this policy" directly in a smart contract. No party in the system — not the executor, not luai, not a compromised API key holder — can produce a valid proof that passes the check without actually satisfying all of those conditions. That is a qualitatively different trust model from anything else in the space.
+A DeFi protocol can encode "I will only accept results computed by this logic, from these sources, under this policy" directly in a smart contract. No party in the system — not the executor, not proveno, not a compromised API key holder — can produce a valid proof that passes the check without actually satisfying all of those conditions. That is a qualitatively different trust model from anything else in the space.
 
 ### Honest Constraints
 
@@ -180,7 +180,7 @@ Failure modes fall into three categories:
 
 **Mitigation:** Treat proving latency as a first-class measurement from Phase 1. Establish baseline numbers for the MVP template profile before optimising anything else. Use the data to explicitly define the latency class the MVP targets — settlement and periodic checks with tolerance windows measured in minutes, not seconds. Document this constraint so that protocols self-select. Post-MVP, investigate proof parallelisation and hardware acceleration, but do not let latency optimisation delay the MVP.
 
-**Hard limit:** There is a floor here that cannot be engineered away in any realistic near-term horizon. Current zkVM proving over general computation takes minutes. Hardware acceleration, parallelisation, and better proof systems will improve this incrementally, but sub-second proving for general VM execution over HTTPS data is not achievable with current technology. This permanently excludes real-time use cases. This is not a problem to be solved later — it is a permanent boundary that defines which use cases luai serves. The honest response is accurate positioning: luai is the right choice for use cases tolerant of minutes-scale latency, and the wrong choice for anything requiring real-time freshness. Overpromising on latency and letting protocols discover this constraint after integration would be damaging.
+**Hard limit:** There is a floor here that cannot be engineered away in any realistic near-term horizon. Current zkVM proving over general computation takes minutes. Hardware acceleration, parallelisation, and better proof systems will improve this incrementally, but sub-second proving for general VM execution over HTTPS data is not achievable with current technology. This permanently excludes real-time use cases. This is not a problem to be solved later — it is a permanent boundary that defines which use cases proveno serves. The honest response is accurate positioning: proveno is the right choice for use cases tolerant of minutes-scale latency, and the wrong choice for anything requiring real-time freshness. Overpromising on latency and letting protocols discover this constraint after integration would be damaging.
 
 ---
 
@@ -221,13 +221,13 @@ For MVP, the clearest initial market is DeFi protocols that need custom price or
 
 ## What Counts as MVP Success
 
-luai reaches MVP when all of the following are true:
+proveno reaches MVP when all of the following are true:
 
 1. A user can submit a supported oracle task in plain English.
 2. The task is mapped to an approved policy or template profile.
 3. The generated Lua is accepted only if it satisfies that policy.
 4. The VM executes deterministically on real HTTPS data.
-5. When a source uses a TLS configuration supported by luai's attestation verifier, the proof includes cryptographic provenance for that response; unsupported TLS configurations are only acceptable under policies that explicitly allow unattested responses.
+5. When a source uses a TLS configuration supported by proveno's attestation verifier, the proof includes cryptographic provenance for that response; unsupported TLS configurations are only acceptable under policies that explicitly allow unattested responses.
 6. A proof commits to policy, program, input, data, and output.
 7. A smart contract on testnet verifies the proof and enforces the expected `policy_hash`.
 8. Another contract can consume the verified result without trusting the executor.
@@ -352,7 +352,7 @@ If `template_price_feed_v1` works end-to-end, you have an MVP candidate.
 
 **Exit condition:**
 
-luai can prove one real HTTPS-backed execution with cryptographically sound provenance.
+proveno can prove one real HTTPS-backed execution with cryptographically sound provenance.
 
 ---
 
@@ -384,13 +384,13 @@ luai can prove one real HTTPS-backed execution with cryptographically sound prov
 
 **Exit condition:**
 
-luai can distinguish between "correctly executed" and "policy-approved" executions.
+proveno can distinguish between "correctly executed" and "policy-approved" executions.
 
 ---
 
 ### Phase 3: Validate On-Chain Viability
 
-**Objective:** Prove that luai results can be consumed by smart contracts under policy constraints.
+**Objective:** Prove that proveno results can be consumed by smart contracts under policy constraints.
 
 **Required work:**
 
@@ -404,13 +404,13 @@ luai can distinguish between "correctly executed" and "policy-approved" executio
 
 **Acceptance criteria:**
 
-- A testnet contract verifies a luai proof successfully
+- A testnet contract verifies a proveno proof successfully
 - The contract rejects proofs with the wrong policy hash
 - Gas and proof size are within a range you consider operationally usable
 
 **Exit condition:**
 
-luai has a policy-enforced, on-chain-verifiable oracle path on testnet.
+proveno has a policy-enforced, on-chain-verifiable oracle path on testnet.
 
 ---
 
@@ -435,7 +435,7 @@ luai has a policy-enforced, on-chain-verifiable oracle path on testnet.
 
 **Exit condition:**
 
-luai has one repeatable, protocol-safe oracle product, not just a toolkit.
+proveno has one repeatable, protocol-safe oracle product, not just a toolkit.
 
 ---
 
@@ -493,7 +493,7 @@ The MVP is safe enough to expose publicly on testnet with known limitations.
 
 **Exit condition:**
 
-luai is an MVP: a usable constrained programmable oracle with proof-backed, policy-bound outputs on testnet.
+proveno is an MVP: a usable constrained programmable oracle with proof-backed, policy-bound outputs on testnet.
 
 ---
 

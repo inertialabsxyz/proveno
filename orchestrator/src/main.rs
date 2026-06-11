@@ -1,10 +1,10 @@
 use clap::Parser;
-use luai::{types::value::LuaValue, vm::engine::VmConfig};
-use luai_orchestrator::{llm, pipeline, prompt, prove, tools};
+use proveno::{types::value::LuaValue, vm::engine::VmConfig};
+use proveno_orchestrator::{llm, pipeline, prompt, prove, tools};
 
 #[derive(Parser)]
-#[command(name = "luai-orchestrator")]
-#[command(about = "LLM-driven agentic pipeline for the luai VM")]
+#[command(name = "proveno-orchestrator")]
+#[command(about = "LLM-driven agentic pipeline for the proveno VM")]
 struct Cli {
     /// The task to accomplish (natural language)
     task: String,

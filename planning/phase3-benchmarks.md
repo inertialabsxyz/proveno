@@ -32,8 +32,8 @@ All gas measurements are EVM-deterministic and do not change between local and S
 | Contract | Address | Deploy tx |
 |---|---|---|
 | `StubOpenVmVerifier` | `0x5FbDB2315678afecb367f032d93F642f64180aa3` | `0x2e210aa4682373d9e39dac55051039134675a124f6fbf1e3c8a282e088d511e3` |
-| `LuaiVerifier`       | `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512` | `0x4694805f51b5bdb3a4847ec7f538ca0fac00dbc09b5ce41645a0ac0ca264aa93` |
-| `LuaiConsumer`       | `0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0` | `0x2b03435d50abc4fb92bf9cd3309066a99a9bccf081630b7c9dfff03f6bd5c613` |
+| `ProvenoVerifier`       | `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512` | `0x4694805f51b5bdb3a4847ec7f538ca0fac00dbc09b5ce41645a0ac0ca264aa93` |
+| `ProvenoConsumer`       | `0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0` | `0x2b03435d50abc4fb92bf9cd3309066a99a9bccf081630b7c9dfff03f6bd5c613` |
 
 > `StubOpenVmVerifier` is an always-pass stub. It replaces the real OpenVM on-chain verifier,
 > which is not yet deployed on any public testnet. All policy-hash enforcement logic is live;
@@ -46,7 +46,7 @@ All gas measurements are EVM-deterministic and do not change between local and S
 A Lua program making a live `http_get` to `https://httpbin.org/json` was compiled, executed
 under `template_price_feed_v1`, and its public inputs were committed into a wire-format proof
 bundle.  From Step 3 the bundle carries the ABI-encoded Groth16 calldata produced by
-`cargo openvm prove evm` (via `luai-openvm-packager --evm-json`).
+`cargo openvm prove evm` (via `proveno-openvm-packager --evm-json`).
 
 **Public inputs committed in the proof:**
 
@@ -91,7 +91,7 @@ The Groth16 calldata is always exactly 256 bytes:
 This is deterministic for any BN254 Groth16 proof regardless of the program being proved.
 The threshold of 100 KB gives ample headroom; the real bundle is well under 1 KB.
 
-### 2. Gas Cost — `LuaiVerifier.verify`
+### 2. Gas Cost — `ProvenoVerifier.verify`
 
 | Metric | Value | Threshold | Verdict |
 |---|---|---|---|
@@ -172,13 +172,13 @@ acceleration options (GPU proving, Risc Zero, SP1) before proceeding.
 
 ```bash
 # 1. Get policy hash
-cargo run -p luai-verifier --bin policy-hash
+cargo run -p proveno-verifier --bin policy-hash
 
 # 2. Full ZK proving pipeline (compile → dry-run → openvm → Groth16 → package)
 bash zkvm-prove.sh examples/prover.lua template_price_feed_v1
 
 # Or: generate proof bundle via bench binary (dry-run only, no ZK proving)
-cargo run -p luai-orchestrator --bin bench
+cargo run -p proveno-orchestrator --bin bench
 
 # 3. Start local testnet
 anvil --port 8545 --block-time 1 &
@@ -215,9 +215,9 @@ cast call 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 \
 
 **Phase 3: PASS.** All three acceptance criteria from `programmable-oracle-mvp-plan.md` are met:
 
-1. ✓ A testnet contract verifies a luai proof successfully (gas: 29,919)
+1. ✓ A testnet contract verifies a proveno proof successfully (gas: 29,919)
 2. ✓ The contract rejects proofs with the wrong policy hash (`PolicyHashMismatch()`)
 3. ✓ Gas and proof size are within operationally usable ranges
 
-**Exit condition met:** luai has a policy-enforced, on-chain-verifiable oracle path on testnet.
+**Exit condition met:** proveno has a policy-enforced, on-chain-verifiable oracle path on testnet.
 Phase 4 may proceed.

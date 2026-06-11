@@ -1,12 +1,12 @@
 mod nargo_tests {
-    use luai::compiler::compile;
-    use luai::noir::encoder::encode_program;
-    use luai::parser::parse;
-    use luai::types::table::{LuaKey, LuaTable};
-    use luai::types::value::{LuaString, LuaValue};
-    use luai::{HostInterface, OracleTape, Vm, VmConfig, VmOutput};
-    use luai_noir::prover::{NoirProof, NoirProver, ProveError};
-    use luai_noir::witness::{NoirWitness, build_witness};
+    use proveno::compiler::compile;
+    use proveno::noir::encoder::encode_program;
+    use proveno::parser::parse;
+    use proveno::types::table::{LuaKey, LuaTable};
+    use proveno::types::value::{LuaString, LuaValue};
+    use proveno::{HostInterface, OracleTape, Vm, VmConfig, VmOutput};
+    use proveno_noir::prover::{NoirProof, NoirProver, ProveError};
+    use proveno_noir::witness::{NoirWitness, build_witness};
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::Instant;
@@ -24,14 +24,14 @@ mod nargo_tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../noir")
     }
 
-    fn run_lua(src: &str) -> (luai::noir::encoder::NoirBytecode, VmOutput) {
-        run_lua_with_host(src, luai::NoopHost)
+    fn run_lua(src: &str) -> (proveno::noir::encoder::NoirBytecode, VmOutput) {
+        run_lua_with_host(src, proveno::NoopHost)
     }
 
     fn run_lua_with_host<H: HostInterface>(
         src: &str,
         host: H,
-    ) -> (luai::noir::encoder::NoirBytecode, VmOutput) {
+    ) -> (proveno::noir::encoder::NoirBytecode, VmOutput) {
         let program = compile(&parse(src).unwrap()).unwrap();
         let bytecode = encode_program(&program).unwrap();
         let config = VmConfig {
@@ -86,7 +86,7 @@ mod nargo_tests {
             let mut t = LuaTable::new();
             t.rawset(
                 LuaKey::String(LuaString::from_str("value")),
-                luai::types::value::LuaValue::Integer(42),
+                proveno::types::value::LuaValue::Integer(42),
             )
             .unwrap();
             Ok(t)
@@ -100,7 +100,7 @@ mod nargo_tests {
     /// `MAX_STEPS`, etc.):
     ///
     /// ```text
-    /// cargo test -p luai-noir --test prove end_to_end_prove_and_verify -- --nocapture
+    /// cargo test -p proveno-noir --test prove end_to_end_prove_and_verify -- --nocapture
     /// ```
     #[test]
     fn end_to_end_prove_and_verify() {

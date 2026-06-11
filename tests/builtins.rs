@@ -2,8 +2,8 @@
 //!
 //! These tests compile + execute Lua source through the full pipeline.
 
-use luai::types::value::LuaValue;
-use luai::{
+use proveno::types::value::LuaValue;
+use proveno::{
     bytecode::verify,
     compiler::compile,
     parser::parse,
@@ -37,7 +37,7 @@ fn int(n: i64) -> LuaValue {
 }
 
 fn s(text: &str) -> LuaValue {
-    use luai::types::value::LuaString;
+    use proveno::types::value::LuaString;
     LuaValue::String(LuaString::from_str(text))
 }
 

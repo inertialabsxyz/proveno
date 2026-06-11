@@ -28,7 +28,7 @@ Do not start Step 2 until Step 1 is merged to master. Steps 2a and 2b touch diff
 
 **Prompt:**
 
-You are wiring the policy hash through the luai ZK proving pipeline. The full context is in `planning/programmable-oracle-mvp-plan.md`. Read the "Phase 3" section before proceeding.
+You are wiring the policy hash through the proveno ZK proving pipeline. The full context is in `planning/programmable-oracle-mvp-plan.md`. Read the "Phase 3" section before proceeding.
 
 ### Context
 
@@ -38,10 +38,10 @@ The pipeline runs as follows:
 
 ```
 Lua source
-  → luai-compiler  → compiled.json
-  → luai-prover    → dry_result.json   (DryRunResult, public_inputs.policy_hash = [0;32] today)
-  → luai-openvm-encoder → /tmp/openvm-1.json  (OpenVMInput = {compiled_program, dry_run_result})
-  → cargo openvm prove app → luai-openvm.app.proof
+  → proveno-compiler  → compiled.json
+  → proveno-prover    → dry_result.json   (DryRunResult, public_inputs.policy_hash = [0;32] today)
+  → proveno-openvm-encoder → /tmp/openvm-1.json  (OpenVMInput = {compiled_program, dry_run_result})
+  → cargo openvm prove app → proveno-openvm.app.proof
 ```
 
 The OpenVM guest (`openvm/src/main.rs`) executes:
@@ -58,7 +58,7 @@ And `prover/src/prover.rs::dry_run` calls:
 let public_inputs = compute_public_inputs(...);   // policy_hash = [0;32]
 ```
 
-So `dry_run_result.public_inputs.policy_hash` is also zero, and the assertion passes — but the revealed policy hash is always zero, which means `LuaiVerifier.sol` can only ever be deployed with `expectedPolicyHash = 0x000...000`.
+So `dry_run_result.public_inputs.policy_hash` is also zero, and the assertion passes — but the revealed policy hash is always zero, which means `ProvenoVerifier.sol` can only ever be deployed with `expectedPolicyHash = 0x000...000`.
 
 The relevant functions are in `src/zkvm/commitment.rs`:
 - `compute_public_inputs(...)` — always zeroes `policy_hash`
@@ -86,20 +86,20 @@ The relevant functions are in `src/zkvm/commitment.rs`:
 
    This preserves the assertion (which still verifies all six fields must match) while threading the policy hash through correctly.
 
-4. **Update `orchestrator/src/bin/bench.rs`** — switch from calling `compute_public_inputs_with_policy` post-hoc to calling `prover::Prover::dry_run_with_policy` so the bench binary exercises the same code path the prover binary will use. The bench binary already imports `luai_prover`; use `dry_run_with_policy` passing `template_price_feed_v1()`.
+4. **Update `orchestrator/src/bin/bench.rs`** — switch from calling `compute_public_inputs_with_policy` post-hoc to calling `prover::Prover::dry_run_with_policy` so the bench binary exercises the same code path the prover binary will use. The bench binary already imports `proveno_prover`; use `dry_run_with_policy` passing `template_price_feed_v1()`.
 
 5. **Add a test** in `prover/src/prover.rs` that:
    - Runs a simple Lua program through `dry_run_with_policy` with `constrained_http_v1()`
    - Asserts `dry_run_result.public_inputs.policy_hash == constrained_http_v1().policy_hash()`
    - Asserts `dry_run_result.public_inputs.policy_hash != [0u8; 32]`
 
-6. **Add a regression test** in `openvm/src/main.rs` is not feasible (the guest runs inside the zkVM). Instead, add a comment above the policy_hash override explaining the invariant: "the prover commits to the policy hash; the guest copies it and reveals it. The on-chain LuaiVerifier checks it. The guest does not re-derive it from a policy document because the policy is not part of the guest's input."
+6. **Add a regression test** in `openvm/src/main.rs` is not feasible (the guest runs inside the zkVM). Instead, add a comment above the policy_hash override explaining the invariant: "the prover commits to the policy hash; the guest copies it and reveals it. The on-chain ProvenoVerifier checks it. The guest does not re-derive it from a policy document because the policy is not part of the guest's input."
 
 ### Do Not Touch
 
 - `src/policy/mod.rs` and `src/policy/profiles.rs` — do not modify the policy definitions
 - `contracts/` — do not modify Solidity contracts
-- `verifier/` — do not modify the luai wire-format verifier
+- `verifier/` — do not modify the proveno wire-format verifier
 - `openvm/src/encoder.rs` — the `OpenVMInput` struct; do not modify its shape (2a owns the packager)
 
 ### Verification
@@ -108,14 +108,14 @@ The relevant functions are in `src/zkvm/commitment.rs`:
 cargo test
 # → all tests pass including the new dry_run_with_policy test
 
-cargo run -p luai_prover -- examples/prover.lua /tmp/dry_result_no_policy.json
+cargo run -p proveno_prover -- examples/prover.lua /tmp/dry_result_no_policy.json
 # → writes dry_result_no_policy.json with policy_hash = "0000...0000"
 
-cargo run -p luai_prover -- examples/prover.lua /tmp/dry_result_with_policy.json \
+cargo run -p proveno_prover -- examples/prover.lua /tmp/dry_result_with_policy.json \
   --policy constrained_http_v1
 # → writes dry_result_with_policy.json; python3 -c "import json; d=json.load(open('/tmp/dry_result_with_policy.json')); print(d['public_inputs']['policy_hash'])" shows non-zero hex
 
-cargo run -p luai-orchestrator --bin bench 2>/dev/null | python3 -c "
+cargo run -p proveno-orchestrator --bin bench 2>/dev/null | python3 -c "
 import json,sys; d=json.load(sys.stdin)
 assert d['policy_hash'] != '0x' + '0'*64, 'policy_hash is zero'
 print('policy_hash OK:', d['policy_hash'])
@@ -131,27 +131,27 @@ print('policy_hash OK:', d['policy_hash'])
 
 **Prompt:**
 
-You are writing the proof packaging binary for luai. This is the missing link between `cargo openvm prove app` (which produces `luai-openvm.app.proof`) and the luai wire-format proof bundle that `luai-verifier` can verify and that `LuaiVerifier.sol` can consume.
+You are writing the proof packaging binary for proveno. This is the missing link between `cargo openvm prove app` (which produces `proveno-openvm.app.proof`) and the proveno wire-format proof bundle that `proveno-verifier` can verify and that `ProvenoVerifier.sol` can consume.
 
 ### Context
 
 After Step 1, the proving pipeline is:
 
 ```
-luai-compiler   → compiled.json
-luai-prover     → dry_result.json          (with real policy_hash)
-luai-openvm-encoder → /tmp/openvm-1.json
-cargo openvm prove app → luai-openvm.app.proof
+proveno-compiler   → compiled.json
+proveno-prover     → dry_result.json          (with real policy_hash)
+proveno-openvm-encoder → /tmp/openvm-1.json
+cargo openvm prove app → proveno-openvm.app.proof
                                 ↑
               THIS IS WHERE WE STOP TODAY
 ```
 
-The next step — packaging the app proof into a luai wire-format bundle — does not exist.
+The next step — packaging the app proof into a proveno wire-format bundle — does not exist.
 
-The luai wire-format proof (defined in `verifier/src/lib.rs`) is:
+The proveno wire-format proof (defined in `verifier/src/lib.rs`) is:
 
 ```
-[magic: 4]              b"luai"
+[magic: 4]              b"proveno"
 [version: 1]            0x01
 [program_hash: 32]
 [input_hash: 32]
@@ -170,16 +170,16 @@ The public inputs (the six 32-byte hashes) are revealed by the guest via six `op
 
 ### Your Task
 
-1. **Research the OpenVM app proof format.** The proof is produced by `cargo openvm prove app` and is located at `luai-openvm.app.proof`. Run `cargo openvm run --bin luai-openvm --input /tmp/openvm-1.json` first (this simulates execution without proving) to understand what public values look like. Read the OpenVM SDK to understand the `StdIn`/`StdOut`/journal serialization used by `openvm::io::reveal_bytes32`.
+1. **Research the OpenVM app proof format.** The proof is produced by `cargo openvm prove app` and is located at `proveno-openvm.app.proof`. Run `cargo openvm run --bin proveno-openvm --input /tmp/openvm-1.json` first (this simulates execution without proving) to understand what public values look like. Read the OpenVM SDK to understand the `StdIn`/`StdOut`/journal serialization used by `openvm::io::reveal_bytes32`.
 
-   Specifically: find out how to deserialize `luai-openvm.app.proof` in Rust to extract:
+   Specifically: find out how to deserialize `proveno-openvm.app.proof` in Rust to extract:
    - The raw proof bytes (to use as `proof_blob`)
    - The six 32-byte public values in reveal order
 
-2. **Create `openvm/src/bin/packager.rs`** — a binary `luai-openvm-packager` with this signature:
+2. **Create `openvm/src/bin/packager.rs`** — a binary `proveno-openvm-packager` with this signature:
 
    ```
-   luai-openvm-packager <proof-file> <output-bundle>
+   proveno-openvm-packager <proof-file> <output-bundle>
    ```
 
    It must:
@@ -187,29 +187,29 @@ The public inputs (the six 32-byte hashes) are revealed by the guest via six `op
    b. Extract the six public values in the order they were revealed:
       `[program_hash, input_hash, tool_responses_hash, output_hash, tls_attestation_hash, policy_hash]`
    c. Build a `PublicInputs` struct from those values
-   d. Call `luai_verifier::build_test_proof(&public_inputs, &proof_bytes)` where `proof_bytes`
+   d. Call `proveno_verifier::build_test_proof(&public_inputs, &proof_bytes)` where `proof_bytes`
       is the serialized proof blob (or the full raw file contents if format is opaque)
    e. Write the wire-format bundle to `<output-bundle>`
    f. Print proof size and the six hash fields
 
-3. **Add `[[bin]]` to `openvm/Cargo.toml`** for `luai-openvm-packager`.
+3. **Add `[[bin]]` to `openvm/Cargo.toml`** for `proveno-openvm-packager`.
 
 4. **Update `openvm/proof-app.sh`** to include the packaging step after proving:
 
    ```bash
    cargo openvm keygen
-   cargo openvm prove app --bin luai-openvm --input /tmp/openvm-1.json
-   cargo openvm verify app --proof luai-openvm.app.proof
-   cargo run --bin luai-openvm-packager -- luai-openvm.app.proof luai-proof.bin
-   echo "Wire-format proof: $(wc -c < luai-proof.bin) bytes"
+   cargo openvm prove app --bin proveno-openvm --input /tmp/openvm-1.json
+   cargo openvm verify app --proof proveno-openvm.app.proof
+   cargo run --bin proveno-openvm-packager -- proveno-openvm.app.proof proveno-proof.bin
+   echo "Wire-format proof: $(wc -c < proveno-proof.bin) bytes"
    ```
 
-5. **Update `zkvm-prove.sh`** (root-level) to call the packager after proving, so the full pipeline produces `luai-proof.bin` as its final output.
+5. **Update `zkvm-prove.sh`** (root-level) to call the packager after proving, so the full pipeline produces `proveno-proof.bin` as its final output.
 
 6. **Write one unit test** in `openvm/src/bin/packager.rs` that:
    - Constructs a mock proof file in the expected format
    - Calls the packaging logic (extracted into a library function)
-   - Asserts the output bundle round-trips through `luai_verifier::verify_proof`
+   - Asserts the output bundle round-trips through `proveno_verifier::verify_proof`
 
 ### Do Not Touch
 
@@ -222,13 +222,13 @@ The public inputs (the six 32-byte hashes) are revealed by the guest via six `op
 ### Verification
 
 ```bash
-cargo test -p luai-openvm
+cargo test -p proveno-openvm
 # → all tests pass including the packager round-trip test
 
 # After a real proving run (requires cargo openvm):
-# cargo openvm prove app --bin luai-openvm --input /tmp/openvm-1.json
-# cargo run --bin luai-openvm-packager -- luai-openvm.app.proof luai-proof.bin
-# luai_verifier::verify_proof(&proof_bundle, &public_inputs, &policy_hash) == Ok(...)
+# cargo openvm prove app --bin proveno-openvm --input /tmp/openvm-1.json
+# cargo run --bin proveno-openvm-packager -- proveno-openvm.app.proof proveno-proof.bin
+# proveno_verifier::verify_proof(&proof_bundle, &public_inputs, &policy_hash) == Ok(...)
 ```
 
 ---
@@ -240,11 +240,11 @@ cargo test -p luai-openvm
 
 **Prompt:**
 
-You are wiring the EVM proof path for luai. OpenVM application proofs (`cargo openvm prove app`) cannot be verified on-chain. This step switches to `cargo openvm prove evm`, which produces a Groth16 proof verifiable by a Solidity contract, and deploys or documents the matching EVM verifier.
+You are wiring the EVM proof path for proveno. OpenVM application proofs (`cargo openvm prove app`) cannot be verified on-chain. This step switches to `cargo openvm prove evm`, which produces a Groth16 proof verifiable by a Solidity contract, and deploys or documents the matching EVM verifier.
 
 ### Context
 
-The current `LuaiVerifier.sol` is constructed with an `IOpenVmVerifier` address:
+The current `ProvenoVerifier.sol` is constructed with an `IOpenVmVerifier` address:
 
 ```solidity
 constructor(bytes32 _expectedPolicyHash, address _openVmVerifier) {
@@ -275,7 +275,7 @@ The EVM verification works as follows:
 Read the OpenVM documentation and source at the pinned tag `v1.4.1` to determine:
 - The exact CLI for EVM proving and key generation
 - What `Groth16Verifier.sol` looks like and how to deploy it
-- How `publicInputsHash` is computed from the revealed bytes (to confirm it matches `LuaiVerifier.sol`'s `keccak256(abi.encode(...))`)
+- How `publicInputsHash` is computed from the revealed bytes (to confirm it matches `ProvenoVerifier.sol`'s `keccak256(abi.encode(...))`)
 
 ### Your Task
 
@@ -285,7 +285,7 @@ Read the OpenVM documentation and source at the pinned tag `v1.4.1` to determine
    - The Solidity verifier contract interface and how to deploy it
    - How `publicInputsHash` is derived from the six revealed `bytes32` values
 
-2. **Verify the `publicInputsHash` computation matches `LuaiVerifier.sol`.** The contract computes:
+2. **Verify the `publicInputsHash` computation matches `ProvenoVerifier.sol`.** The contract computes:
 
    ```solidity
    bytes32 piHash = keccak256(abi.encode(
@@ -294,7 +294,7 @@ Read the OpenVM documentation and source at the pinned tag `v1.4.1` to determine
    ));
    ```
 
-   Confirm that OpenVM's EVM verifier uses the same hash as its `publicInputsHash`. If it differs, document the mismatch and what change is needed in `LuaiVerifier.sol`.
+   Confirm that OpenVM's EVM verifier uses the same hash as its `publicInputsHash`. If it differs, document the mismatch and what change is needed in `ProvenoVerifier.sol`.
 
 3. **Add `contracts/src/OpenVmGroth16Verifier.sol`** — either:
    a. Copy the auto-generated verifier from OpenVM's output, or
@@ -314,7 +314,7 @@ Read the OpenVM documentation and source at the pinned tag `v1.4.1` to determine
 
 ### Do Not Touch
 
-- `contracts/src/LuaiVerifier.sol` — do not modify the verification logic; only the deploy script and adapter are in scope
+- `contracts/src/ProvenoVerifier.sol` — do not modify the verification logic; only the deploy script and adapter are in scope
 - `contracts/src/StubOpenVmVerifier.sol` — keep it; it is used by existing tests
 - `openvm/src/main.rs` — do not modify the guest
 - `openvm/src/bin/packager.rs` — Step 2a's domain
@@ -350,7 +350,7 @@ You are completing the ZK proving pipeline and re-running the Phase 3 benchmarks
 After Steps 2a and 2b:
 
 - **Step 1** wired policy hash through the prover and guest
-- **Step 2a** added `luai-openvm-packager` which reads an OpenVM app proof and produces a luai wire-format bundle
+- **Step 2a** added `proveno-openvm-packager` which reads an OpenVM app proof and produces a proveno wire-format bundle
 - **Step 2b** added the EVM Groth16 verifier path and `OpenVmGroth16Verifier.sol`
 
 The `planning/phase3-benchmarks.md` file currently records:
@@ -366,7 +366,7 @@ compile → prover → encoder → openvm run (simulation)
 ```
 After Step 2a it also runs:
 ```
-→ openvm prove app → packager → luai-proof.bin
+→ openvm prove app → packager → proveno-proof.bin
 ```
 
 ### Your Task
@@ -375,7 +375,7 @@ After Step 2a it also runs:
    - `cargo openvm keygen --evm` (if keys don't exist)
    - `cargo openvm prove evm ...` → `proof.json`
    - Extract proof calldata from `proof.json` as the `proof_blob` for the wire-format bundle
-   - Run the packager to produce `luai-proof.bin`
+   - Run the packager to produce `proveno-proof.bin`
    - Print proof size, policy hash, and public inputs tuple for `cast`
 
 2. **Run the full pipeline** with `template_price_feed_v1` policy and a live `http_get`:
@@ -385,7 +385,7 @@ After Step 2a it also runs:
    - Capture proof size, total wall-clock time
 
 3. **Deploy and re-measure on-chain**:
-   - Deploy `LuaiVerifier` pointing to `OpenVmGroth16Verifier` (or stub if EVM verifier not yet available; see Step 2b)
+   - Deploy `ProvenoVerifier` pointing to `OpenVmGroth16Verifier` (or stub if EVM verifier not yet available; see Step 2b)
    - Submit the real proof via `cast send`
    - Capture gas from the receipt
    - Submit a proof with wrong policy hash; confirm `PolicyHashMismatch()` revert
@@ -401,7 +401,7 @@ After Step 2a it also runs:
 ### Do Not Touch
 
 - `src/policy/` — do not modify policy definitions
-- `contracts/src/LuaiVerifier.sol` — do not modify the contract logic
+- `contracts/src/ProvenoVerifier.sol` — do not modify the contract logic
 - The `verifier/src/lib.rs` wire format — do not change the proof format
 
 ### Verification
@@ -416,7 +416,7 @@ cat planning/phase3-benchmarks.md | grep -E 'PASS|FAIL'
 cat planning/phase3-benchmarks.md | grep "proof_blob is a placeholder"
 # → should return nothing (placeholder language removed)
 
-bash zkvm-prove.sh 2>&1 | grep -E 'proof size|Wire-format|luai-proof.bin'
+bash zkvm-prove.sh 2>&1 | grep -E 'proof size|Wire-format|proveno-proof.bin'
 # → shows real proof size in bytes
 ```
 

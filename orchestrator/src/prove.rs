@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use luai::{
+use proveno::{
     compiler::proto::CompiledProgram,
     host::tape::OracleTape,
     tls::TlsAttestationRecord,
@@ -11,8 +11,8 @@ use luai::{
     vm::engine::VmOutput,
     zkvm::commitment::{PublicInputs, compute_public_inputs},
 };
-use luai_noir::{ProveOptions, ProveOutputError, prove_from_artifacts};
-use luai_prover::prover::DryRunResult;
+use proveno_noir::{ProveOptions, ProveOutputError, prove_from_artifacts};
+use proveno_prover::prover::DryRunResult;
 
 /// Paths and public inputs produced by `build_proof_artifacts`.
 pub struct ProveArtifacts {
@@ -115,7 +115,7 @@ pub fn build_proof_artifacts_with_noir(
         build_proof_artifacts(program, input, output, tls_attestations, output_dir)?;
 
     // Reconstruct the `DryRunResult` from the freshly written JSON so we
-    // share the exact bytes the standalone luai-noir CLI would consume.
+    // share the exact bytes the standalone proveno-noir CLI would consume.
     let dry_json = fs::read_to_string(&artifacts.dry_result_path).map_err(|e| {
         format!(
             "failed to read {}: {e}",
@@ -264,7 +264,7 @@ pub fn format_prove_section(artifacts: &ProveArtifacts) -> String {
         None => {
             out.push_str("  Next steps:\n");
             out.push_str(&format!(
-                "    cargo run -p luai-noir -- {} {} --prove\n",
+                "    cargo run -p proveno-noir -- {} {} --prove\n",
                 artifacts.compiled_path.display(),
                 artifacts.dry_result_path.display(),
             ));
@@ -279,7 +279,7 @@ mod tests {
     use super::*;
     use crate::pipeline;
     use crate::tools::StubHost;
-    use luai::{types::value::LuaValue, vm::engine::VmConfig};
+    use proveno::{types::value::LuaValue, vm::engine::VmConfig};
 
     fn run_program(source: &str) -> (CompiledProgram, VmOutput) {
         let program = pipeline::compile_and_verify(source).unwrap();
@@ -461,7 +461,7 @@ return 1"#;
 
     #[test]
     fn public_inputs_match_prover_dry_run() {
-        use luai_prover::prover::Prover;
+        use proveno_prover::prover::Prover;
 
         let source = r#"local r = tool.call("echo", {message = "test"})
 return r.message"#;

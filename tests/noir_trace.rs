@@ -1,5 +1,5 @@
-use luai::types::value::LuaValue;
-use luai::{
+use proveno::types::value::LuaValue;
+use proveno::{
     bytecode::verify,
     compiler::compile,
     noir::opcodes::{CALL, JMP_IF_NOT, RET},
@@ -17,7 +17,7 @@ fn make_vm(record_trace: bool) -> Vm<NoopHost> {
     )
 }
 
-fn compile_program(src: &str) -> luai::compiler::proto::CompiledProgram {
+fn compile_program(src: &str) -> proveno::compiler::proto::CompiledProgram {
     let ast = parse(src).expect("parse");
     let program = compile(&ast).expect("compile");
     verify(&program).expect("verify");

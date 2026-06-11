@@ -10,7 +10,7 @@ Noir trace verification vs OpenVM re-execution. ARM-native proving is a secondar
 
 ## Context
 
-The existing OpenVM pipeline proves execution by re-running the entire luai VM inside a
+The existing OpenVM pipeline proves execution by re-running the entire proveno VM inside a
 RISC-V zkVM guest. The Noir pipeline instead proves execution by verifying a pre-recorded
 execution trace in a bespoke circuit. Both produce the same 6-hash `PublicInputs`
 commitment; the Noir approach is faster because there is no RISC-V interpreter overhead.
@@ -25,7 +25,7 @@ ISA that verifies pc transitions, step continuity, program hash, and return valu
 ### Phase 1 — Full ISA Encoding
 
 **Goal:** Expand the circuit and add a Rust encoder so it can represent any compiled
-luai program — not just the 16-opcode benchmark subset.
+proveno program — not just the 16-opcode benchmark subset.
 
 **Why first:** Everything downstream (trace emission, witness generation, proof) depends
 on a stable opcode mapping. Define it once here; all later phases reference it.
@@ -35,7 +35,7 @@ scope for this phase. Programs with nested function calls are deferred to Phase 
 
 #### 1a. Opcode mapping
 
-Define a canonical opcode ID for every luai `Instruction` variant. The encoding is a
+Define a canonical opcode ID for every proveno `Instruction` variant. The encoding is a
 `u8` discriminant; the operand is a unified `i64` (zero for instructions with none).
 
 | ID | Instruction       | Operand                      |
@@ -87,7 +87,7 @@ Define a canonical opcode ID for every luai `Instruction` variant. The encoding 
 | 44 | IterInitArray     | jump offset (i16 → i64)      |
 | 45 | IterNext          | jump offset (i16 → i64)      |
 
-Define this mapping in `src/noir/opcodes.rs` in the root luai crate.
+Define this mapping in `src/noir/opcodes.rs` in the root proveno crate.
 
 #### 1b. Circuit changes (`noir/src/main.nr`)
 
@@ -134,7 +134,7 @@ pub fn encode_program(program: &CompiledProgram) -> Result<NoirBytecode, EncodeE
 
 ### Phase 2 — VM Trace Emission
 
-**Goal:** The luai VM records a full execution trace during every run, ready to be
+**Goal:** The proveno VM records a full execution trace during every run, ready to be
 passed to the Noir witness generator.
 
 **Why second:** The trace format must match what the circuit expects. Lock it in before
@@ -174,10 +174,10 @@ pub struct TraceStep {
 
 ---
 
-### Phase 3 — Witness Pipeline and `luai-noir` Crate
+### Phase 3 — Witness Pipeline and `proveno-noir` Crate
 
-**Goal:** A new `luai-noir` crate that takes a `CompiledProgram + VmOutput` and
-produces a verified Noir proof, mirroring the role of `luai-openvm`.
+**Goal:** A new `proveno-noir` crate that takes a `CompiledProgram + VmOutput` and
+produces a verified Noir proof, mirroring the role of `proveno-openvm`.
 
 **Also in this phase:** multi-function program support (Call, Closure, Ret across frames).
 
@@ -199,10 +199,10 @@ deferred to a later phase if required.
 Update the circuit to add Call (36), PCall (40), and Closure (38) to the
 unconstrained-next_pc set alongside Ret (37).
 
-#### 3b. `luai-noir` crate structure
+#### 3b. `proveno-noir` crate structure
 
 ```
-luai-noir/
+proveno-noir/
 ├── Cargo.toml
 └── src/
     ├── lib.rs
@@ -210,8 +210,8 @@ luai-noir/
     └── prover.rs       # calls nargo, returns proof bytes + public inputs
 ```
 
-Not added to the luai workspace as a default member — enable via `--features noir` or
-include conditionally. Mirror the `luai-openvm` crate structure.
+Not added to the proveno workspace as a default member — enable via `--features noir` or
+include conditionally. Mirror the `proveno-openvm` crate structure.
 
 #### 3c. Witness serialiser (`witness.rs`)
 
@@ -423,7 +423,7 @@ this ordering via their contract.
 
 #### 6c. Integration with existing contracts
 
-The existing `LuaiVerifier.sol` (or equivalent) is updated to call the Noir Solidity
+The existing `ProvenoVerifier.sol` (or equivalent) is updated to call the Noir Solidity
 verifier instead of the OpenVM Groth16 verifier. The `PublicInputs` struct and
 `policy_hash` enforcement logic remain unchanged — only the proof verification call
 changes.
@@ -469,7 +469,7 @@ verifier is deployed.
 
 1. **Proving time threshold: 30 seconds.** This is the maximum acceptable wall-clock
    time for end-to-end proof generation. Extrapolating from benchmarks (1024 steps ≈
-   1 second flat), the full luai circuit at `MAX_STEPS = 16,384` with oracle tape
+   1 second flat), the full proveno circuit at `MAX_STEPS = 16,384` with oracle tape
    SHA-256 and the richer ISA will likely be 2–3x heavier per step, putting the
    estimate at 32–48 seconds — potentially over budget. `MAX_STEPS` may need to be
    reduced to 8,192 to comfortably hit 30 seconds. Benchmark after Phase 3 completes

@@ -4,8 +4,8 @@ pragma solidity ^0.8.24;
 import {Test, console} from "forge-std/Test.sol";
 
 import {HonkVerifier} from "../src/HonkVerifier.sol";
-import {IHonkVerifier, LuaiVerifier} from "../src/LuaiVerifier.sol";
-import {LuaiConsumer} from "../src/LuaiConsumer.sol";
+import {IHonkVerifier, ProvenoVerifier} from "../src/ProvenoVerifier.sol";
+import {ProvenoConsumer} from "../src/ProvenoConsumer.sol";
 import {PublicInputs} from "../src/Types.sol";
 
 /// @dev Passes any proof. Used to exercise consumer logic that lives downstream
@@ -20,17 +20,17 @@ contract PassingHonkVerifier is IHonkVerifier {
     }
 }
 
-contract LuaiConsumerTest is Test {
+contract ProvenoConsumerTest is Test {
     // Real proof + verifier path — exercises the actual UltraHonk verifier.
     HonkVerifier internal honk;
-    LuaiVerifier internal realVerifier;
-    LuaiConsumer internal realConsumer;
+    ProvenoVerifier internal realVerifier;
+    ProvenoConsumer internal realConsumer;
 
     // Mock-backed path — bypasses proof verification so the consumer's payload
     // and decode logic can be exercised on crafted inputs.
     PassingHonkVerifier internal passingHonk;
-    LuaiVerifier internal mockVerifier;
-    LuaiConsumer internal mockConsumer;
+    ProvenoVerifier internal mockVerifier;
+    ProvenoConsumer internal mockConsumer;
 
     bytes internal proof;
     PublicInputs internal realInputs;
@@ -45,12 +45,12 @@ contract LuaiConsumerTest is Test {
         realInputs = _loadInputs();
 
         honk = new HonkVerifier();
-        realVerifier = new LuaiVerifier(realInputs.policyHash, address(honk));
-        realConsumer = new LuaiConsumer(address(realVerifier));
+        realVerifier = new ProvenoVerifier(realInputs.policyHash, address(honk));
+        realConsumer = new ProvenoConsumer(address(realVerifier));
 
         passingHonk = new PassingHonkVerifier();
-        mockVerifier = new LuaiVerifier(realInputs.policyHash, address(passingHonk));
-        mockConsumer = new LuaiConsumer(address(mockVerifier));
+        mockVerifier = new ProvenoVerifier(realInputs.policyHash, address(passingHonk));
+        mockConsumer = new ProvenoConsumer(address(mockVerifier));
     }
 
     function test_consumes_result_and_stores_price() public {
@@ -59,7 +59,7 @@ contract LuaiConsumerTest is Test {
         pi.outputHash = keccak256(payload);
 
         vm.expectEmit(false, false, false, true, address(mockConsumer));
-        emit LuaiConsumer.PriceUpdated(DEMO_PRICE, DEMO_SOURCES, DEMO_TS);
+        emit ProvenoConsumer.PriceUpdated(DEMO_PRICE, DEMO_SOURCES, DEMO_TS);
         mockConsumer.consumeResult(proof, pi, payload);
 
         assertEq(mockConsumer.lastPrice(), DEMO_PRICE);
@@ -75,7 +75,7 @@ contract LuaiConsumerTest is Test {
         bytes memory tampered = bytes.concat(payload);
         tampered[0] = bytes1(uint8(tampered[0]) ^ 0xFF);
 
-        vm.expectRevert(LuaiConsumer.OutputPayloadMismatch.selector);
+        vm.expectRevert(ProvenoConsumer.OutputPayloadMismatch.selector);
         mockConsumer.consumeResult(proof, pi, tampered);
     }
 
@@ -87,7 +87,7 @@ contract LuaiConsumerTest is Test {
 
         bytes memory payload = abi.encode(DEMO_PRICE, DEMO_SOURCES, DEMO_TS);
 
-        vm.expectRevert(LuaiVerifier.ProofInvalid.selector);
+        vm.expectRevert(ProvenoVerifier.ProofInvalid.selector);
         realConsumer.consumeResult(tamperedProof, realInputs, payload);
     }
 

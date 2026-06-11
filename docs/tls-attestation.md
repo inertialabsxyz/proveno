@@ -2,7 +2,7 @@
 
 ## What the attestation hash proves
 
-When a luai Lua program calls `http_get` or `http_post` over HTTPS, the
+When a proveno Lua program calls `http_get` or `http_post` over HTTPS, the
 prover captures the server's DER-encoded TLS certificate chain. If the chain
 satisfies all of the following conditions:
 

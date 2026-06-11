@@ -6,7 +6,7 @@ Token list responses are ~5-25KB each of JSON with 50+ token entries.
 In LangChain's ReAct loop, every API response is appended to the conversation
 context and sent back to the LLM, accumulating ~50-70KB of data across iterations.
 
-Compare against: examples/large-response-processing.sh (luai)
+Compare against: examples/large-response-processing.sh (proveno)
 
 Usage:
     pip install -r requirements.txt

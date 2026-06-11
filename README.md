@@ -1,4 +1,4 @@
-# luai
+# proveno
 
 A deterministic, sandboxed Lua virtual machine for agentic workloads.
 
@@ -10,16 +10,16 @@ Scripts run as single-shot programs: they receive an input object, may invoke ho
 - **Sandboxed** — no filesystem, network, or OS access; tools are the only external interface
 - **Bounded** — gas, memory, depth, and output limits guarantee termination
 - **Integer-only arithmetic** — signed 64-bit; use fixed-point for fractional values
-- **ZK-provable** — two-phase execution model proved via Noir (`luai-noir` + `nargo`/`bb`)
+- **ZK-provable** — two-phase execution model proved via Noir (`proveno-noir` + `nargo`/`bb`)
 
 ## Workspace
 
 | Crate | Purpose |
 |-------|---------|
-| `luai` | Core library — parser, compiler, bytecode verifier, VM, host, oracle tape |
+| `proveno` | Core library — parser, compiler, bytecode verifier, VM, host, oracle tape |
 | `compiler` | CLI: compile Lua source → verified bytecode JSON |
 | `prover` | CLI: dry-run compiled programs, produce oracle tapes and public inputs |
-| `luai-noir` | Noir witness writer + `nargo`/`bb` driver — the canonical proving path |
+| `proveno-noir` | Noir witness writer + `nargo`/`bb` driver — the canonical proving path |
 | `orchestrator` | LLM-driven agentic pipeline — accepts a task, generates and executes Lua |
 
 > Noir is the canonical proving path. The historical OpenVM implementation has been
@@ -52,17 +52,17 @@ host/            — HostInterface for tool calls; transcript recording;
 ### Proving pipeline
 
 ```
-1. Compile       luai-compiler source.lua compiled.json
-2. Dry run       luai-prover compiled.json dry_result.json
+1. Compile       proveno-compiler source.lua compiled.json
+2. Dry run       proveno-prover compiled.json dry_result.json
                  → executes with live host, records oracle tape
                  → computes public inputs (SHA-256 commitments)
-3. Prove         cargo run -p luai-noir -- compiled.json dry_result.json --prove
+3. Prove         cargo run -p proveno-noir -- compiled.json dry_result.json --prove
                  → builds the Noir witness, drives `nargo execute` +
                    `bb prove`/`bb verify` against the trace circuit
-4. Submit        cast send / consumeResult against LuaiConsumer.sol
+4. Submit        cast send / consumeResult against ProvenoConsumer.sol
                  → on-chain UltraHonk verify via HonkVerifier.sol
-                 → LuaiVerifier enforces policyHash match
-                 → LuaiConsumer asserts keccak256(outputPayload) == outputHash
+                 → ProvenoVerifier enforces policyHash match
+                 → ProvenoConsumer asserts keccak256(outputPayload) == outputHash
 ```
 
 Public inputs commit to: program hash, input hash, tool responses hash, output
@@ -75,10 +75,10 @@ End-to-end demo against a local anvil chain. Requires `nargo`, `bb`, `forge`,
 
 ```bash
 # 1. (one terminal) build everything once so the demo doesn't time out on cargo
-cargo build --release -p luai-orchestrator -p luai-noir
+cargo build --release -p proveno-orchestrator -p proveno-noir
 
 # 2. (second terminal) run the demo — spins up a temporary anvil, deploys the
-#    HonkVerifier/LuaiVerifier/LuaiConsumer triple, generates a Noir proof for
+#    HonkVerifier/ProvenoVerifier/ProvenoConsumer triple, generates a Noir proof for
 #    a small Lua program, and submits it on chain.
 ANTHROPIC_API_KEY=sk-... bash demo-noir-e2e-local.sh \
     "return a small JSON object {price=100, sources=1, ts=1700000000}"
@@ -91,19 +91,19 @@ RPC_URL=https://... PRIVATE_KEY=0x... DEPLOY=1 \
 # 4. Or against an existing deployment:
 ANTHROPIC_API_KEY=sk-... \
 RPC_URL=https://... PRIVATE_KEY=0x... \
-LUAI_VERIFIER_ADDR=0x... LUAI_CONSUMER_ADDR=0x... \
+PROVENO_VERIFIER_ADDR=0x... PROVENO_CONSUMER_ADDR=0x... \
     bash demo-noir-e2e.sh "<task>"
 ```
 
 The script prints the proof bytes, the 8-element `bytes32[]` public inputs,
-the on-chain `LuaiVerifier.verify` result, and the consumer state after the
+the on-chain `ProvenoVerifier.verify` result, and the consumer state after the
 `consumeResult` call. See the comment header in `demo-noir-e2e.sh` for the
 encoding-bridge caveat between `outputHash` (SHA-256) and the consumer's
 `keccak256(outputPayload)` check.
 
 ## Orchestrator
 
-The orchestrator connects an LLM (Claude) to the luai VM, forming an agentic pipeline:
+The orchestrator connects an LLM (Claude) to the proveno VM, forming an agentic pipeline:
 
 1. User provides a natural-language task
 2. The LLM generates a Lua program to accomplish it
@@ -116,7 +116,7 @@ The orchestrator connects an LLM (Claude) to the luai VM, forming an agentic pip
 
 ```
 export ANTHROPIC_API_KEY=sk-...
-cargo run -p luai-orchestrator -- "fetch the top hacker news story title"
+cargo run -p proveno-orchestrator -- "fetch the top hacker news story title"
 ```
 
 ### Options
@@ -157,7 +157,7 @@ The `--json` flag outputs all of this as structured JSON for machine consumption
 With `--prove`, the orchestrator generates ZK proof artifacts after successful execution:
 
 ```
-cargo run -p luai-orchestrator -- --prove "score this wallet for onchain reputation"
+cargo run -p proveno-orchestrator -- --prove "score this wallet for onchain reputation"
 ```
 
 This produces `proof-output/compiled.json` and `proof-output/dry_result.json` — the inputs needed to generate a cryptographic proof via the Noir circuit. The proof attests that:
@@ -170,13 +170,13 @@ A third party can verify the proof without trusting the executor. The execution 
 
 **Current trust boundary:** The ZK proof guarantees computational integrity — that the program ran correctly and produced the claimed output from the claimed inputs. It does not yet guarantee data provenance (that API responses came from the real servers). TLS attestation (verifying server certificates inside the VM) is planned to close this gap.
 
-### Benchmarks: luai vs LangChain ReAct
+### Benchmarks: proveno vs LangChain ReAct
 
-luai generates a complete program in a single LLM call, then executes it in the VM at zero token cost. Traditional agent frameworks like LangChain use a ReAct loop where each tool call is a round-trip through the LLM, with the full conversation history growing at each step.
+proveno generates a complete program in a single LLM call, then executes it in the VM at zero token cost. Traditional agent frameworks like LangChain use a ReAct loop where each tool call is a round-trip through the LLM, with the full conversation history growing at each step.
 
 **Task: Onchain wallet reputation scoring (2 API calls)**
 
-| | luai | LangChain |
+| | proveno | LangChain |
 |---|---|---|
 | LLM calls | 1 | 2 |
 | Input tokens | 1,568 | 1,951 |
@@ -185,32 +185,32 @@ luai generates a complete program in a single LLM call, then executes it in the 
 
 **Task: Multi-chain wallet scoring (8 API calls across 4 chains)**
 
-| | luai | LangChain |
+| | proveno | LangChain |
 |---|---|---|
 | LLM calls | 1 | 2 |
 | Input tokens | — | 4,004 |
 | Output tokens | — | 1,163 |
 | **Total tokens** | **3,346** | **5,167** |
 
-At 8 API calls, LangChain uses **1.55x** more tokens. The gap widens with task complexity: each additional tool call adds API response data to LangChain's conversation context, while luai's execution cost remains zero tokens regardless of how many tool calls the program makes.
+At 8 API calls, LangChain uses **1.55x** more tokens. The gap widens with task complexity: each additional tool call adds API response data to LangChain's conversation context, while proveno's execution cost remains zero tokens regardless of how many tool calls the program makes.
 
 **Task: Cross-chain token portfolio analysis (12 API calls, ~69KB response data)**
 
-| | luai | LangChain |
+| | proveno | LangChain |
 |---|---|---|
 | LLM calls | 1 | 2 |
 | Input tokens | 1,628 | 26,715 |
 | Output tokens | 1,197 | 1,841 |
 | **Total tokens** | **2,825** | **28,556** |
 
-At 12 API calls with larger payloads (ERC-20 token lists at ~5-25KB each), LangChain uses **10.1x** more tokens. The API response data accumulates in LangChain's conversation context — 69KB of JSON becomes ~26K input tokens on the second LLM call. luai processes all of it in the VM at zero token cost.
+At 12 API calls with larger payloads (ERC-20 token lists at ~5-25KB each), LangChain uses **10.1x** more tokens. The API response data accumulates in LangChain's conversation context — 69KB of JSON becomes ~26K input tokens on the second LLM call. proveno processes all of it in the VM at zero token cost.
 
-Beyond token efficiency, luai produces a cryptographic proof of correct execution. LangChain produces an answer — luai produces an answer anyone can verify.
+Beyond token efficiency, proveno produces a cryptographic proof of correct execution. LangChain produces an answer — proveno produces an answer anyone can verify.
 
 Benchmark scripts are in `examples/`:
-- `examples/score-wallet.sh` — single-chain scoring (luai)
-- `examples/multichain-score-wallet.sh` — multi-chain scoring (luai)
-- `examples/large-response-processing.sh` — cross-chain token portfolio (luai)
+- `examples/score-wallet.sh` — single-chain scoring (proveno)
+- `examples/multichain-score-wallet.sh` — multi-chain scoring (proveno)
+- `examples/large-response-processing.sh` — cross-chain token portfolio (proveno)
 - `examples/score-wallet-langchain.py` — single-chain scoring (LangChain)
 - `examples/multichain-score-langchain.py` — multi-chain scoring (LangChain)
 - `examples/large-response-langchain.py` — cross-chain token portfolio (LangChain)

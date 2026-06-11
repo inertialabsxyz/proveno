@@ -28,7 +28,7 @@ cd "$REPO_ROOT"
 
 # Use a random high port to avoid clashing with an already-running anvil.
 PORT=$(( ( RANDOM % 10000 ) + 30000 ))
-ANVIL_LOG="${PROVE_OUTPUT:-/tmp/luai-demo}/anvil.log"
+ANVIL_LOG="${PROVE_OUTPUT:-/tmp/proveno-demo}/anvil.log"
 mkdir -p "$(dirname "$ANVIL_LOG")"
 
 # Default anvil account #0 — well-known dev key, never use on a live chain.

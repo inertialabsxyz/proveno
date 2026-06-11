@@ -3,11 +3,11 @@ use std::{
     fs::{self, File},
 };
 
-use luai::{bytecode, compiler, parser};
+use proveno::{bytecode, compiler, parser};
 
 fn main() {
     let path = env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("usage: luai-compiler <source.lua> [output.json]");
+        eprintln!("usage: proveno-compiler <source.lua> [output.json]");
         std::process::exit(1);
     });
     let source = fs::read_to_string(&path).unwrap_or_else(|e| {

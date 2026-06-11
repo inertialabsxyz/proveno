@@ -10,8 +10,8 @@ interface IHonkVerifier {
         returns (bool);
 }
 
-/// @notice Verifies a luai UltraHonk proof against the expected policy hash.
-contract LuaiVerifier {
+/// @notice Verifies a proveno UltraHonk proof against the expected policy hash.
+contract ProvenoVerifier {
     using PublicInputsLib for PublicInputs;
 
     error PolicyHashMismatch();
@@ -29,7 +29,7 @@ contract LuaiVerifier {
         honkVerifier = IHonkVerifier(_honkVerifier);
     }
 
-    /// @notice Verify a luai proof. Reverts with `PolicyHashMismatch` if the
+    /// @notice Verify a proveno proof. Reverts with `PolicyHashMismatch` if the
     /// proof commits to a different policy than this contract enforces, or
     /// with `ProofInvalid` if the UltraHonk verifier rejects the proof.
     ///

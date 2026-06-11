@@ -1,14 +1,14 @@
 [package]
-name = "luai-orchestrator"
+name = "proveno-orchestrator"
 version = "0.1.0"
 edition = "2024"
-default-run = "luai-orchestrator"
+default-run = "proveno-orchestrator"
 
 [dependencies]
-luai = { path = "..", features = ["serde", "std", "zkvm"] }
-luai_prover = { path = "../prover" }
-luai-noir = { path = "../luai-noir" }
-luai-verifier = { path = "../verifier" }
+proveno = { path = "..", features = ["serde", "std", "zkvm"] }
+proveno_prover = { path = "../prover" }
+proveno-noir = { path = "../proveno-noir" }
+proveno-verifier = { path = "../verifier" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
@@ -25,7 +25,7 @@ noir-prove = []
 tempfile = "3"
 
 [[bin]]
-name = "luai-orchestrator"
+name = "proveno-orchestrator"
 path = "src/main.rs"
 
 [[bin]]

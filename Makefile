@@ -39,7 +39,7 @@ test-integration:
 # Prints prove/verify wall-time per test so regressions are visible.
 # Requires `nargo` and `bb` on PATH.
 test-prove:
-	cargo test -p luai-noir --test prove -- --nocapture
+	cargo test -p proveno-noir --test prove -- --nocapture
 
 # Auto-fix formatting and apply safe clippy suggestions
 fix:

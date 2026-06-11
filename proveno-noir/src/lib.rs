@@ -3,11 +3,11 @@ pub mod witness;
 
 use std::path::PathBuf;
 
-use luai::{
+use proveno::{
     OracleTape, TapeHost, Vm, VmConfig, compiler::CompiledProgram, noir::encoder::encode_program,
     types::value::LuaValue,
 };
-use luai_prover::prover::DryRunResult;
+use proveno_prover::prover::DryRunResult;
 
 pub use prover::{NoirProof, NoirProver, NoirPublicInputs, ProveError};
 pub use witness::{NoirWitness, WitnessError, build_witness, write_prover_toml};
@@ -33,7 +33,7 @@ pub struct ProveOutput {
 /// result, replay against the oracle tape, build the witness, write
 /// `Prover.toml`, invoke `bb prove`, and optionally `bb verify`.
 ///
-/// This mirrors the flow of the `luai-noir` standalone binary so callers can
+/// This mirrors the flow of the `proveno-noir` standalone binary so callers can
 /// produce in-memory proof artifacts without shelling out.
 pub fn prove_from_artifacts(
     compiled: &CompiledProgram,

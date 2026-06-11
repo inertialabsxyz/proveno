@@ -1,4 +1,4 @@
-use luai::{
+use proveno::{
     bytecode, compiler,
     host::transcript::ToolCallStatus,
     parser,
@@ -79,17 +79,17 @@ fn source_line(source: &str, line: u32) -> &str {
 
 fn run(source: &str) -> Result<(), VmError> {
     let ast = parser::parse(source).map_err(|e| {
-        VmError::RuntimeError(LuaValue::String(luai::types::value::LuaString::from_str(
+        VmError::RuntimeError(LuaValue::String(proveno::types::value::LuaString::from_str(
             &format!("parse error: {e:?}"),
         )))
     })?;
     let program = compiler::compile(&ast).map_err(|e| {
-        VmError::RuntimeError(LuaValue::String(luai::types::value::LuaString::from_str(
+        VmError::RuntimeError(LuaValue::String(proveno::types::value::LuaString::from_str(
             &format!("compile error: {e:?}"),
         )))
     })?;
     bytecode::verify(&program).map_err(|e| {
-        VmError::RuntimeError(LuaValue::String(luai::types::value::LuaString::from_str(
+        VmError::RuntimeError(LuaValue::String(proveno::types::value::LuaString::from_str(
             &format!("verify error: {e:?}"),
         )))
     })?;
@@ -141,7 +141,7 @@ fn main() {
     };
 
     if let Err(e) = run(&source) {
-        use luai::vm::gas::VmError;
+        use proveno::vm::gas::VmError;
         match e {
             VmError::WithLine(line, inner) => {
                 let text = source_line(&source, line).trim();

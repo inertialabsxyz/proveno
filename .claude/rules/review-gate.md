@@ -22,7 +22,7 @@ Call the `Agent` tool with a prompt that includes:
 Agent({
   description: "Requirements review: <feature name>",
   prompt: """
-You are a review agent for luai. Your job is to verify a completed implementation
+You are a review agent for proveno. Your job is to verify a completed implementation
 against its source requirements, fix any gaps, and commit the fixes.
 
 ## What was implemented

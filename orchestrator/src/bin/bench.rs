@@ -4,11 +4,11 @@
 //! under the `template_price_feed_v1` policy, builds a wire-format proof bundle,
 //! and prints everything needed for the on-chain submission step.
 //!
-//! Usage: cargo run -p luai-orchestrator --bin bench
+//! Usage: cargo run -p proveno-orchestrator --bin bench
 
 use std::time::Instant;
 
-use luai::{
+use proveno::{
     bytecode, compiler, parser,
     policy::profiles::template_price_feed_v1,
     types::{
@@ -17,8 +17,8 @@ use luai::{
     },
     vm::engine::{HostInterface, VmConfig},
 };
-use luai_prover::prover::Prover;
-use luai_verifier::build_test_proof;
+use proveno_prover::prover::Prover;
+use proveno_verifier::build_test_proof;
 
 /// Minimal host for the benchmark: supports `http_get` only.
 struct BenchHost {
@@ -105,7 +105,7 @@ return r.status
 
     let policy = template_price_feed_v1();
 
-    eprintln!("=== luai Phase 3 Benchmark ===");
+    eprintln!("=== proveno Phase 3 Benchmark ===");
     eprintln!("Policy: template_price_feed_v1");
     eprintln!("Policy hash: 0x{}", hex32(&policy.policy_hash()));
 

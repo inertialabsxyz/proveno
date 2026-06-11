@@ -1,21 +1,21 @@
 use std::{env, fs, path::PathBuf};
 
-use luai::compiler::CompiledProgram;
-use luai_noir::{ProveOptions, prove_from_artifacts};
-use luai_prover::prover::DryRunResult;
+use proveno::compiler::CompiledProgram;
+use proveno_noir::{ProveOptions, prove_from_artifacts};
+use proveno_prover::prover::DryRunResult;
 
 fn main() {
     let mut args = env::args().skip(1);
 
     let compiled_path = args.next().unwrap_or_else(|| {
         eprintln!(
-            "usage: luai-noir-witness <compiled.json> <dry_result.json> [--circuit-dir <dir>] [--prove]"
+            "usage: proveno-noir-witness <compiled.json> <dry_result.json> [--circuit-dir <dir>] [--prove]"
         );
         std::process::exit(1);
     });
     let dry_path = args.next().unwrap_or_else(|| {
         eprintln!(
-            "usage: luai-noir-witness <compiled.json> <dry_result.json> [--circuit-dir <dir>] [--prove]"
+            "usage: proveno-noir-witness <compiled.json> <dry_result.json> [--circuit-dir <dir>] [--prove]"
         );
         std::process::exit(1);
     });
@@ -61,11 +61,11 @@ fn main() {
 
     if !do_prove {
         // Replicate prior behaviour: write Prover.toml only, no proving.
-        use luai::{
+        use proveno::{
             OracleTape, TapeHost, Vm, VmConfig, noir::encoder::encode_program,
             types::value::LuaValue,
         };
-        use luai_noir::{build_witness, write_prover_toml};
+        use proveno_noir::{build_witness, write_prover_toml};
 
         let bytecode = encode_program(&compiled_program).unwrap_or_else(|e| {
             eprintln!("encode error: {e:?}");

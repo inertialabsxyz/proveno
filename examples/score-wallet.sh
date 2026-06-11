@@ -1,4 +1,4 @@
-cargo run -p luai-orchestrator -- --prove --verbose \
+cargo run -p proveno-orchestrator -- --prove --verbose \
   "Score wallet 0x11E4857Bb9993a50c685A79AFad4E6F65D518DDa for onchain reputation.
    Check transaction count, token transfer activity, whether it has been flagged as scam, and ENS ownership.
 

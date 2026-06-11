@@ -3,7 +3,7 @@ use std::{
     fs::{self, File},
 };
 
-use luai::{VmConfig, compiler::CompiledProgram, policy::OraclePolicy, types::value::LuaValue};
+use proveno::{VmConfig, compiler::CompiledProgram, policy::OraclePolicy, types::value::LuaValue};
 
 use crate::{host::ProverHost, prover::Prover};
 
@@ -11,7 +11,7 @@ mod host;
 mod prover;
 
 fn parse_policy(name: &str) -> Option<OraclePolicy> {
-    use luai::policy::profiles::{constrained_http_v1, template_price_feed_v1};
+    use proveno::policy::profiles::{constrained_http_v1, template_price_feed_v1};
     match name {
         "constrained_http_v1" => Some(constrained_http_v1()),
         "template_price_feed_v1" => Some(template_price_feed_v1()),
@@ -29,7 +29,7 @@ fn main() {
         }),
         None => {
             eprintln!(
-                "Usage: luai-prover <compiled.json> [output.json] [--policy constrained_http_v1|template_price_feed_v1]"
+                "Usage: proveno-prover <compiled.json> [output.json] [--policy constrained_http_v1|template_price_feed_v1]"
             );
             return;
         }

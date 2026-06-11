@@ -79,19 +79,19 @@ fn source_line(source: &str, line: u32) -> &str {
 
 fn run(source: &str) -> Result<(), VmError> {
     let ast = parser::parse(source).map_err(|e| {
-        VmError::RuntimeError(LuaValue::String(proveno::types::value::LuaString::from_str(
-            &format!("parse error: {e:?}"),
-        )))
+        VmError::RuntimeError(LuaValue::String(
+            proveno::types::value::LuaString::from_str(&format!("parse error: {e:?}")),
+        ))
     })?;
     let program = compiler::compile(&ast).map_err(|e| {
-        VmError::RuntimeError(LuaValue::String(proveno::types::value::LuaString::from_str(
-            &format!("compile error: {e:?}"),
-        )))
+        VmError::RuntimeError(LuaValue::String(
+            proveno::types::value::LuaString::from_str(&format!("compile error: {e:?}")),
+        ))
     })?;
     bytecode::verify(&program).map_err(|e| {
-        VmError::RuntimeError(LuaValue::String(proveno::types::value::LuaString::from_str(
-            &format!("verify error: {e:?}"),
-        )))
+        VmError::RuntimeError(LuaValue::String(
+            proveno::types::value::LuaString::from_str(&format!("verify error: {e:?}")),
+        ))
     })?;
 
     let mut vm = Vm::new(VmConfig::default(), DemoHost);

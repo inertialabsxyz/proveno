@@ -115,7 +115,7 @@ ANTHROPIC_API_KEY=… bash demo-noir-e2e-local.sh "<task>"
 
 Public inputs (8, in circuit-declaration order): `num_steps`, `program_hash`,
 `return_value`, `tool_responses_hash`, `input_hash`, `output_hash`,
-`tls_attestation_hash`, `policy_hash`. The Solidity `PublicInputs` struct in
+`attestation_hash`, `policy_hash`. The Solidity `PublicInputs` struct in
 `contracts/src/Types.sol` mirrors this ordering exactly; reordering breaks
 verification.
 
@@ -123,7 +123,7 @@ verification.
 
 Proveno is a **programmable oracle**: it turns a simple program into a verifiable one. A program (often LLM-authored) is compiled to bytecode and executed inside a deterministic, sandboxed, bounded interpreter; a ZK proof attests that this exact program ran over these exact inputs and produced this exact output, and a smart contract verifies that proof on-chain before acting on the result. All tool calls are recorded in a cryptographic transcript that can be replayed for proof generation.
 
-The proof guarantees **computation integrity** (the program ran correctly over the inputs it was given), not **data provenance** (that those inputs are authentic data from the real source). Closing the provenance gap via TLS attestation / zkTLS inside the tool-call boundary is the roadmap, not a shipped feature — keep this boundary honest in docs and code comments.
+The proof guarantees **computation integrity** (the program ran correctly over the inputs it was given), not **data provenance** (that those inputs are authentic data from the real source). Provenance is **delegated, not built**: the `attestation_hash` public input *binds* (does not verify) a per-call provider attestation to the response bytes it covers, via `OracleTape::attestation_commitment`; a provider plugs in at `HostInterface::take_attestation`. Concrete providers (Pyth signatures, zkTLS networks) are follow-on work. Keep this boundary honest in docs and code comments — the circuit binds blobs, it does not authenticate them.
 
 ### Execution pipeline
 

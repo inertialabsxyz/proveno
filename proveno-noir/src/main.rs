@@ -62,8 +62,7 @@ fn main() {
     if !do_prove {
         // Replicate prior behaviour: write Prover.toml only, no proving.
         use proveno::{
-            OracleTape, TapeHost, Vm, VmConfig, noir::encoder::encode_program,
-            types::value::LuaValue,
+            TapeHost, Vm, VmConfig, noir::encoder::encode_program, types::value::LuaValue,
         };
         use proveno_noir::{build_witness, write_prover_toml};
 
@@ -72,12 +71,12 @@ fn main() {
             std::process::exit(1);
         });
         let policy_hash = dry_run_result.public_inputs.policy_hash;
-        let tls_attestations = dry_run_result.tls_attestations;
+        let oracle_tape = dry_run_result.oracle_tape.clone();
         let config = VmConfig {
             record_trace: true,
             ..VmConfig::default()
         };
-        let output = Vm::new(config, TapeHost::new(dry_run_result.oracle_tape))
+        let output = Vm::new(config, TapeHost::new(oracle_tape))
             .execute(&compiled_program, LuaValue::Nil)
             .unwrap_or_else(|e| {
                 eprintln!("execution error: {e:?}");
@@ -87,15 +86,15 @@ fn main() {
             LuaValue::Integer(n) => *n,
             _ => 0,
         };
-        let replay_tape = OracleTape::from_records(&output.transcript);
+        // Witness from the original tape so per-call attestations survive (the
+        // replay through TapeHost reproduces responses but not provenance).
         let witness = build_witness(
             &bytecode,
             &output.trace,
             return_val,
-            &replay_tape,
+            &dry_run_result.oracle_tape,
             &LuaValue::Nil,
             &output,
-            &tls_attestations,
             policy_hash,
         )
         .unwrap_or_else(|e| {

@@ -725,11 +725,14 @@ fn error_code_call_depth_exceeded_is_recoverable() {
     assert_eq!(out.return_value, LuaValue::Boolean(false));
 }
 
-// ── TLS attestation ───────────────────────────────────────────────────────────
+// ── TLS attestation provider ────────────────────────────────────────────────
 //
-// These tests verify the TLS attestation pipeline:
-//   - P-256 HTTPS connections produce a tls_attestation_hash committing to
-//     real pubkey content (≠ the empty-attestation sentinel)
+// These tests verify the TLS attestation *provider* (`compute_tls_attestation_hash`).
+// Post-pivot it is provider machinery that *produces* an attestation blob; it is
+// decoupled from the `attestation_hash` public input (which binds whatever blob
+// the host attaches per call). The tests check the producer in isolation:
+//   - P-256 HTTPS connections produce a hash committing to real pubkey content
+//     (≠ the empty-attestation sentinel)
 //   - Non-HTTPS (or non-P256) connections degrade cleanly: the hash equals
 //     `empty_tls_attestation_hash()` (canonical `Poseidon2::hash([], 0)`)
 //
@@ -1037,7 +1040,7 @@ fn run_with_host<H: HostInterface>(
 
 /// End-to-end: make a real HTTPS request to a P-256-serving endpoint, run the
 /// full prove pipeline (compile → prover dry-run via `compute_public_inputs`),
-/// and assert that `PublicInputs.tls_attestation_hash` is non-zero.
+/// and assert the TLS provider hash commits to real pubkey content.
 ///
 /// This test makes a real network call to example.com.
 #[test]
@@ -1049,7 +1052,7 @@ fn tls_attestation_nonzero_for_p256() {
 
     let attestations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let host = TlsCapturingHost::new(attestations.clone());
-    let (output, records) = run_with_host(src, host, attestations);
+    let (_output, records) = run_with_host(src, host, attestations);
 
     // Verify hostname and cert_not_after are populated.
     assert_eq!(
@@ -1061,42 +1064,22 @@ fn tls_attestation_nonzero_for_p256() {
         "cert_not_after must be non-zero for a real cert"
     );
 
-    // Verify via `compute_tls_attestation_hash` directly. A real cert chain
-    // commits to actual pubkey bytes, so the hash must differ from the empty
-    // sentinel (which is what an unverified/missing attestation produces).
+    // The TLS attestation provider commits to actual pubkey bytes for a real
+    // P-256 chain, so its hash differs from the empty sentinel. Post-pivot this
+    // helper is provider machinery (it *produces* an attestation blob); it is
+    // decoupled from the `attestation_hash` public input, which now binds
+    // whatever per-call blob the host attaches to each response.
     let hash = compute_tls_attestation_hash(&records);
     assert_ne!(
         hash,
         empty_tls_attestation_hash(),
-        "expected non-empty tls_attestation_hash for P-256 server (got records: {records:?})"
+        "expected non-empty TLS attestation for P-256 server (got records: {records:?})"
     );
-
-    // Also verify end-to-end through `PublicInputs` (the full prove pipeline).
-    #[cfg(feature = "zkvm")]
-    {
-        use proveno::{host::tape::OracleTape, zkvm::commitment::compute_public_inputs};
-        let block = parse(src).expect("parse failed");
-        let program = compile(&block).expect("compile failed");
-        let oracle_tape = OracleTape::from_records(&output.transcript);
-        let pi = compute_public_inputs(
-            program.program_hash,
-            &LuaValue::Nil,
-            &oracle_tape,
-            &output,
-            &records,
-        );
-        assert_ne!(
-            pi.tls_attestation_hash,
-            empty_tls_attestation_hash(),
-            "PublicInputs.tls_attestation_hash must commit to real pubkey content for P-256 server"
-        );
-    }
 }
 
 /// Degradation: when no P-256 TLS attestation is available (non-HTTPS or
-/// non-P256 server), execution must complete without panic and yield the
-/// canonical empty-attestation hash (`Poseidon2::hash([], 0)` serialised).
-/// Also verifies `PublicInputs.tls_attestation_hash` matches that sentinel.
+/// non-P256 server), the TLS provider must yield the canonical
+/// empty-attestation hash (`Poseidon2::hash([], 0)` serialised) without panic.
 #[test]
 fn tls_degrades_cleanly_for_non_p256() {
     let src = r#"
@@ -1108,36 +1091,15 @@ fn tls_degrades_cleanly_for_non_p256() {
     let host = NonTlsStubHost {
         attestations: attestations.clone(),
     };
-    let (output, records) = run_with_host(src, host, attestations);
+    let (_output, records) = run_with_host(src, host, attestations);
 
-    // All attestations are unavailable → hash must equal the empty sentinel.
+    // All attestations are unavailable → provider hash is the empty sentinel.
     let hash = compute_tls_attestation_hash(&records);
     assert_eq!(
         hash,
         empty_tls_attestation_hash(),
-        "expected canonical empty tls_attestation_hash when no P-256 attestation is available"
+        "expected canonical empty TLS attestation when no P-256 attestation is available"
     );
-
-    // Also verify end-to-end through `PublicInputs`.
-    #[cfg(feature = "zkvm")]
-    {
-        use proveno::{host::tape::OracleTape, zkvm::commitment::compute_public_inputs};
-        let block = parse(src).expect("parse failed");
-        let program = compile(&block).expect("compile failed");
-        let oracle_tape = OracleTape::from_records(&output.transcript);
-        let pi = compute_public_inputs(
-            program.program_hash,
-            &LuaValue::Nil,
-            &oracle_tape,
-            &output,
-            &records,
-        );
-        assert_eq!(
-            pi.tls_attestation_hash,
-            empty_tls_attestation_hash(),
-            "PublicInputs.tls_attestation_hash must equal the empty sentinel when no P-256 attestation"
-        );
-    }
 }
 
 /// `reverify_attestations` is the exact function the zkVM guest runs.  This

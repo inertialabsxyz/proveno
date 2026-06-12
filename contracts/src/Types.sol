@@ -12,7 +12,7 @@ struct PublicInputs {
     bytes32 toolResponsesHash;
     bytes32 inputHash;
     bytes32 outputHash;
-    bytes32 tlsAttestationHash;
+    bytes32 attestationHash;
     bytes32 policyHash;
 }
 
@@ -31,7 +31,7 @@ uint256 constant PROVENO_PUBLIC_INPUTS_LENGTH = 194;
 ///        [34 .. 66)     toolResponsesHash  bytes
 ///        [66 .. 98)     inputHash          bytes
 ///        [98 .. 130)    outputHash         bytes
-///        [130 .. 162)   tlsAttestationHash bytes
+///        [130 .. 162)   attestationHash bytes
 ///        [162 .. 194)   policyHash         bytes
 ///
 /// Reordering or merging fields breaks verification — each [u8; 32] in the Noir
@@ -59,7 +59,7 @@ library PublicInputsLib {
         i += 32;
         _writeBytes32AsBytes(packed, i, pi.outputHash);
         i += 32;
-        _writeBytes32AsBytes(packed, i, pi.tlsAttestationHash);
+        _writeBytes32AsBytes(packed, i, pi.attestationHash);
         i += 32;
         _writeBytes32AsBytes(packed, i, pi.policyHash);
     }

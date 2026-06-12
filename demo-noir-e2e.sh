@@ -143,7 +143,7 @@ PI_HEX_2=$(jq -r '.proving.public_inputs[2]' "$ORCH_JSON")  # returnValue
 PI_HEX_3=$(jq -r '.proving.public_inputs[3]' "$ORCH_JSON")  # toolResponsesHash
 PI_HEX_4=$(jq -r '.proving.public_inputs[4]' "$ORCH_JSON")  # inputHash
 PI_HEX_5=$(jq -r '.proving.public_inputs[5]' "$ORCH_JSON")  # outputHash
-PI_HEX_6=$(jq -r '.proving.public_inputs[6]' "$ORCH_JSON")  # tlsAttestationHash
+PI_HEX_6=$(jq -r '.proving.public_inputs[6]' "$ORCH_JSON")  # attestationHash
 PI_HEX_7=$(jq -r '.proving.public_inputs[7]' "$ORCH_JSON")  # policyHash
 LUA_RETURN=$(jq -r '.return_value' "$ORCH_JSON")
 

@@ -51,12 +51,20 @@ pub enum TapeEntry {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OracleTape {
     pub entries: Vec<TapeEntry>,
+    /// Per-entry provenance attestation blobs, positionally aligned with
+    /// `entries` (empty blob = no attestation). Carried alongside `entries`
+    /// rather than inside `TapeEntry` so the existing `tool_responses_hash`
+    /// commitment and `TapeHost` replay are unchanged — the program never sees
+    /// attestations; only `attestation_commitment()` binds them.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub attestations: Vec<Vec<u8>>,
 }
 
 impl OracleTape {
     pub fn new() -> Self {
         OracleTape {
             entries: Vec::new(),
+            attestations: Vec::new(),
         }
     }
 
@@ -73,7 +81,11 @@ impl OracleTape {
                 }
             })
             .collect();
-        OracleTape { entries }
+        let attestations = records.iter().map(|r| r.attestation.clone()).collect();
+        OracleTape {
+            entries,
+            attestations,
+        }
     }
 
     /// Poseidon2 commitment over all tape entries in order.
@@ -108,11 +120,7 @@ impl OracleTape {
                     TapeEntry::Ok(bytes) => (0x00, bytes.as_slice()),
                     TapeEntry::Err(msg) => (0x01, msg.as_bytes()),
                 };
-                let mut inputs = Vec::with_capacity(2 + payload.len());
-                inputs.push(u8_to_field(tag));
-                inputs.push(u32_to_field(payload.len() as u32));
-                inputs.extend(bytes_to_fields(payload));
-                poseidon2_hash(&inputs)
+                Self::response_leaf(tag, payload)
             })
             .collect();
         field_to_be_bytes32(poseidon2_hash(&leaves))
@@ -123,6 +131,95 @@ impl OracleTape {
         self.commitment_hash()
             .iter()
             .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    /// Per-entry response leaf — `Poseidon2(tag, len, payload_bytes...)`.
+    ///
+    /// This is exactly the leaf `commitment_hash` builds for the tool-responses
+    /// commitment. `attestation_commitment` reuses it so the provenance bind is
+    /// provably over the *same* response bytes that `tool_responses_hash`
+    /// commits to — the circuit computes this leaf once and feeds both hashes.
+    fn response_leaf(tag: u8, payload: &[u8]) -> crate::host::poseidon2::FieldElement {
+        let mut inputs = Vec::with_capacity(2 + payload.len());
+        inputs.push(u8_to_field(tag));
+        inputs.push(u32_to_field(payload.len() as u32));
+        inputs.extend(bytes_to_fields(payload));
+        poseidon2_hash(&inputs)
+    }
+
+    /// Bind-only provenance commitment: welds each response leaf to the
+    /// provenance attestation the host sourced for it, per call, in order.
+    ///
+    /// Nested two-level Poseidon2. Each entry binds its response leaf (identical
+    /// to the `commitment_hash` leaf) to an attestation leaf, then the bound
+    /// leaves are hashed together:
+    ///
+    /// ```text
+    ///     resp_leaf_i  = Poseidon2( tag, resp_len, resp_bytes... )
+    ///     att_leaf_i   = Poseidon2( att_len, att_bytes... )
+    ///     bound_leaf_i = Poseidon2( resp_leaf_i, att_leaf_i )
+    ///     commitment   = Poseidon2( bound_leaf_0, ..., bound_leaf_{n-1} )
+    /// ```
+    ///
+    /// The nesting (rather than one flat absorb of response ‖ attestation) keeps
+    /// each sub-hash a fixed-shape, padded buffer hashed with a `message_size` —
+    /// the pattern the Noir circuit uses — so no dynamic-offset indexing is
+    /// needed to recompute it in-circuit.
+    ///
+    /// This is "bind", not "verify": the attestation bytes are committed, not
+    /// checked. A downstream consumer that trusts the provider verifies the
+    /// attestation against the response it covers. Unattested calls (empty blob)
+    /// still produce a stable `att_leaf` over `att_len = 0`, so the commitment
+    /// is well-defined whether or not provenance is present.
+    ///
+    /// An empty tape commits to `Poseidon2([])`, matching `commitment_hash`.
+    pub fn attestation_commitment(&self) -> [u8; 32] {
+        let leaves: Vec<_> = self
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| {
+                let (tag, payload): (u8, &[u8]) = match entry {
+                    TapeEntry::Ok(bytes) => (0x00, bytes.as_slice()),
+                    TapeEntry::Err(msg) => (0x01, msg.as_bytes()),
+                };
+                let resp_leaf = Self::response_leaf(tag, payload);
+                let att_leaf = Self::att_leaf(self.attestation_at(i));
+                poseidon2_hash(&[resp_leaf, att_leaf])
+            })
+            .collect();
+        field_to_be_bytes32(poseidon2_hash(&leaves))
+    }
+
+    /// The attestation blob for entry `i` (empty slice when none).
+    fn attestation_at(&self, i: usize) -> &[u8] {
+        self.attestations
+            .get(i)
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Attestation leaf for one blob: `Poseidon2(att_len, att_bytes...)`.
+    fn att_leaf(attestation: &[u8]) -> crate::host::poseidon2::FieldElement {
+        let mut inputs = Vec::with_capacity(1 + attestation.len());
+        inputs.push(u32_to_field(attestation.len() as u32));
+        inputs.extend(bytes_to_fields(attestation));
+        poseidon2_hash(&inputs)
+    }
+
+    /// Per-entry attestation leaves, serialized big-endian, in tape order.
+    ///
+    /// The Noir circuit takes these as witness and combines each with the
+    /// response leaf it already computes — `Poseidon2(resp_leaf, att_leaf)` — to
+    /// reproduce `attestation_commitment` *without* the raw attestation bytes
+    /// in-circuit. Bind-only: the leaf is a pass-through commitment to the blob,
+    /// which the circuit does not verify.
+    pub fn attestation_leaves_be(&self) -> Vec<[u8; 32]> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(i, _)| field_to_be_bytes32(Self::att_leaf(self.attestation_at(i))))
             .collect()
     }
 
@@ -202,6 +299,10 @@ mod tests {
     };
 
     fn ok_record(seq: usize, response_json: &[u8]) -> ToolCallRecord {
+        ok_record_att(seq, response_json, &[])
+    }
+
+    fn ok_record_att(seq: usize, response_json: &[u8], attestation: &[u8]) -> ToolCallRecord {
         ToolCallRecord {
             seq,
             tool_name: "tool".to_owned(),
@@ -211,6 +312,7 @@ mod tests {
             response_bytes: response_json.len(),
             response_canonical: response_json.to_vec(),
             error_message: String::new(),
+            attestation: attestation.to_vec(),
             gas_charged: 100,
             status: ToolCallStatus::Ok,
         }
@@ -226,6 +328,7 @@ mod tests {
             response_bytes: 0,
             response_canonical: Vec::new(),
             error_message: msg.to_owned(),
+            attestation: Vec::new(),
             gas_charged: 0,
             status: ToolCallStatus::Error,
         }
@@ -309,6 +412,71 @@ mod tests {
         let t_ok = OracleTape::from_records(&[ok_record(0, b"\"msg\"")]);
         let t_err = OracleTape::from_records(&[err_record(0, "msg")]);
         assert_ne!(t_ok.commitment_hash(), t_err.commitment_hash());
+    }
+
+    // ── OracleTape::attestation_commitment (bind-only provenance) ─────────────
+
+    #[test]
+    fn attestation_commitment_is_32_bytes() {
+        let tape = OracleTape::from_records(&[ok_record_att(0, b"{}", b"sig")]);
+        assert_eq!(tape.attestation_commitment().len(), 32);
+    }
+
+    #[test]
+    fn attestation_commitment_empty_tape_is_deterministic() {
+        let h1 = OracleTape::new().attestation_commitment();
+        let h2 = OracleTape::new().attestation_commitment();
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn attestation_commitment_is_deterministic_for_same_tape() {
+        // Replaying the same (response, attestation) pairs yields the identical
+        // commitment — the determinism invariant the bind relies on.
+        let recs = || vec![ok_record_att(0, b"{\"p\":1}", b"sigA"), err_record(1, "x")];
+        let h1 = OracleTape::from_records(&recs()).attestation_commitment();
+        let h2 = OracleTape::from_records(&recs()).attestation_commitment();
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn attestation_commitment_binds_to_response_bytes() {
+        // Same attestation, tampered response → different commitment.
+        // This is the anti-"attestation-laundering" guarantee: an attestation
+        // cannot be re-presented over response bytes it does not cover.
+        let same_sig = b"sig";
+        let t1 = OracleTape::from_records(&[ok_record_att(0, b"{\"price\":100}", same_sig)]);
+        let t2 = OracleTape::from_records(&[ok_record_att(0, b"{\"price\":999}", same_sig)]);
+        assert_ne!(t1.attestation_commitment(), t2.attestation_commitment());
+    }
+
+    #[test]
+    fn attestation_commitment_binds_to_attestation_bytes() {
+        // Same response, different attestation → different commitment.
+        let resp = b"{\"price\":100}";
+        let t1 = OracleTape::from_records(&[ok_record_att(0, resp, b"sigA")]);
+        let t2 = OracleTape::from_records(&[ok_record_att(0, resp, b"sigB")]);
+        assert_ne!(t1.attestation_commitment(), t2.attestation_commitment());
+    }
+
+    #[test]
+    fn attestation_commitment_attested_differs_from_unattested() {
+        let resp = b"{\"price\":100}";
+        let attested = OracleTape::from_records(&[ok_record_att(0, resp, b"sig")]);
+        let unattested = OracleTape::from_records(&[ok_record(0, resp)]);
+        assert_ne!(
+            attested.attestation_commitment(),
+            unattested.attestation_commitment()
+        );
+    }
+
+    #[test]
+    fn attestation_commitment_is_independent_of_tool_responses_hash() {
+        // The provenance commitment is a separate slot — it must not perturb the
+        // existing tool_responses_hash, which the circuit recomputes.
+        let attested = OracleTape::from_records(&[ok_record_att(0, b"{}", b"sig")]);
+        let unattested = OracleTape::from_records(&[ok_record(0, b"{}")]);
+        assert_eq!(attested.commitment_hash(), unattested.commitment_hash());
     }
 
     // ── TapeHost ─────────────────────────────────────────────────────────────

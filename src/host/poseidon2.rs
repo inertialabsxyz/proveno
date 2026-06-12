@@ -10,7 +10,7 @@
 //! used by the existing prover and the way the Noir circuit feeds bytes into
 //! `Poseidon2::hash`.
 
-use acir::FieldElement;
+pub(crate) use acir::FieldElement;
 use bn254_blackbox_solver::poseidon2_permutation;
 
 const RATE: usize = 3;

@@ -25,7 +25,7 @@ pub struct NoirPublicInputs {
     pub input_hash: [u8; 32],
     pub tool_responses_hash: [u8; 32],
     pub output_hash: [u8; 32],
-    pub tls_attestation_hash: [u8; 32],
+    pub attestation_hash: [u8; 32],
     pub policy_hash: [u8; 32],
 }
 
@@ -195,7 +195,7 @@ impl NoirProver {
                 input_hash: witness.input_hash,
                 tool_responses_hash: witness.tool_responses_hash,
                 output_hash: witness.output_hash,
-                tls_attestation_hash: witness.tls_attestation_hash,
+                attestation_hash: witness.attestation_hash,
                 policy_hash: witness.policy_hash,
             },
             prove_duration,

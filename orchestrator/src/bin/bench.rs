@@ -150,7 +150,7 @@ return r.status
         "input_hash":           format!("0x{}", hex32(&public_inputs.input_hash)),
         "tool_responses_hash":  format!("0x{}", hex32(&public_inputs.tool_responses_hash)),
         "output_hash":          format!("0x{}", hex32(&public_inputs.output_hash)),
-        "tls_attestation_hash": format!("0x{}", hex32(&public_inputs.tls_attestation_hash)),
+        "attestation_hash": format!("0x{}", hex32(&public_inputs.attestation_hash)),
         "proof_size_bytes":     proof_size,
         "exec_latency_ms":      exec_ms,
         "proof_bundle_file":    "bench_proof.bin",
@@ -161,7 +161,7 @@ return r.status
             hex32(&public_inputs.input_hash),
             hex32(&public_inputs.tool_responses_hash),
             hex32(&public_inputs.output_hash),
-            hex32(&public_inputs.tls_attestation_hash),
+            hex32(&public_inputs.attestation_hash),
             hex32(&public_inputs.policy_hash),
         ),
     });

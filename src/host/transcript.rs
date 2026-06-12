@@ -39,6 +39,11 @@ pub struct ToolCallRecord {
     /// Error message returned by the host (empty string on success).
     /// Used to replay `Err(msg)` responses from an `OracleTape`.
     pub error_message: String,
+    /// Provenance attestation blob the host sourced for this response (empty
+    /// when none). Bind-only: committed alongside the response bytes, not
+    /// verified here. Always empty for failed calls.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub attestation: Vec<u8>,
     /// Gas charged for this tool call (0 for failed calls).
     pub gas_charged: u64,
     /// Status of the call.
@@ -58,12 +63,31 @@ impl Transcript {
         }
     }
 
-    /// Record a successful tool call.
+    /// Record a successful tool call with no provenance attestation.
     pub fn record_ok(
         &mut self,
         tool_name: &str,
         args_canonical: Vec<u8>,
         response_canonical: Vec<u8>,
+        gas_charged: u64,
+    ) {
+        self.record_ok_attested(
+            tool_name,
+            args_canonical,
+            response_canonical,
+            Vec::new(),
+            gas_charged,
+        );
+    }
+
+    /// Record a successful tool call along with the provenance attestation the
+    /// host sourced for it (empty `attestation` is equivalent to `record_ok`).
+    pub fn record_ok_attested(
+        &mut self,
+        tool_name: &str,
+        args_canonical: Vec<u8>,
+        response_canonical: Vec<u8>,
+        attestation: Vec<u8>,
         gas_charged: u64,
     ) {
         let seq = self.records.len();
@@ -80,6 +104,7 @@ impl Transcript {
             response_bytes,
             response_canonical,
             error_message: String::new(),
+            attestation,
             gas_charged,
             status: ToolCallStatus::Ok,
         });
@@ -105,6 +130,7 @@ impl Transcript {
             response_bytes: 0,
             response_canonical: Vec::new(),
             error_message: error_message.to_owned(),
+            attestation: Vec::new(),
             gas_charged,
             status: ToolCallStatus::Error,
         });
@@ -198,6 +224,31 @@ mod tests {
         assert_eq!(r.response_hash, "");
         assert_eq!(r.response_bytes, 0);
         assert_eq!(r.gas_charged, 0);
+    }
+
+    #[test]
+    fn record_ok_has_empty_attestation_by_default() {
+        let mut t = Transcript::new();
+        t.record_ok("tool", vec![], b"resp".to_vec(), 0);
+        assert!(t.records()[0].attestation.is_empty());
+    }
+
+    #[test]
+    fn record_ok_attested_stores_blob() {
+        let mut t = Transcript::new();
+        t.record_ok_attested("tool", vec![], b"resp".to_vec(), b"sig".to_vec(), 0);
+        assert_eq!(t.records()[0].attestation, b"sig");
+        // Attestation does not perturb the response hash.
+        let mut t2 = Transcript::new();
+        t2.record_ok("tool", vec![], b"resp".to_vec(), 0);
+        assert_eq!(t.records()[0].response_hash, t2.records()[0].response_hash);
+    }
+
+    #[test]
+    fn record_error_has_empty_attestation() {
+        let mut t = Transcript::new();
+        t.record_error("broken", vec![], 0, "boom");
+        assert!(t.records()[0].attestation.is_empty());
     }
 
     #[test]

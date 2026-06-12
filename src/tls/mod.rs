@@ -1,14 +1,19 @@
 //! TLS attestation data structures and hash commitment.
 //!
+//! This module is an attestation **producer** — one of potentially several
+//! provenance providers. It is decoupled from the `attestation_hash` public
+//! input (which binds, per call, whatever opaque blob the host attaches via
+//! `HostInterface::take_attestation`; see `OracleTape::attestation_commitment`).
+//! The circuit no longer verifies certificates in-circuit.
+//!
 //! `TlsAttestationRecord` holds a DER-encoded certificate chain captured
 //! during an HTTPS connection, plus metadata indicating whether the chain was
 //! verified as P-256 ECDSA against the Mozilla root CA set.
 //!
 //! `compute_tls_attestation_hash` produces a Poseidon2 commitment over the
-//! P-256 public-key halves (x || y) of every verified cert in the chain.
-//! Both sides of the ZK pipeline commit to the same content: the Noir circuit
-//! at `noir/src/main.nr` feeds the same pubkey bytes (one byte per Field) into
-//! `Poseidon2::hash` and compares the result to `tls_attestation_hash`.
+//! P-256 public-key halves (x || y) of every verified cert in the chain — the
+//! kind of blob a TLS provider would attach to a tool call for the proof to
+//! bind.
 //!
 //! The empty-record case is not zero-sentinel: it returns the canonical
 //! Poseidon2 hash of the empty input vector, matching `Poseidon2::hash([], 0)`

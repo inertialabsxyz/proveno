@@ -149,8 +149,17 @@ impl<H: HostInterface> ToolRegistry<H> {
                     + resp_canonical.len() as u64;
                 gas.charge(gas_cost)?;
 
-                // 7f. Record transcript.
-                transcript.record_ok(name, args_canonical, resp_canonical, gas_cost);
+                // 7f. Take the host's provenance attestation (if any) for this
+                //     response, then record the transcript. Queried only on the
+                //     committed path so a failed call never consumes it.
+                let attestation = self.host.take_attestation().unwrap_or_default();
+                transcript.record_ok_attested(
+                    name,
+                    args_canonical,
+                    resp_canonical,
+                    attestation,
+                    gas_cost,
+                );
 
                 // 7g. Return table.
                 Ok(resp_table)
@@ -249,6 +258,59 @@ mod tests {
         assert_eq!(transcript.len(), 1);
         assert_eq!(transcript.records()[0].status, ToolCallStatus::Ok);
         assert_eq!(transcript.records()[0].tool_name, "search");
+    }
+
+    struct AttestingHost {
+        response: LuaTable,
+        attestation: Vec<u8>,
+    }
+
+    impl HostInterface for AttestingHost {
+        fn call_tool(&mut self, _name: &str, _args: &LuaTable) -> Result<LuaTable, String> {
+            Ok(self.response.clone())
+        }
+        fn take_attestation(&mut self) -> Option<Vec<u8>> {
+            Some(self.attestation.clone())
+        }
+    }
+
+    #[test]
+    fn attestation_flows_from_host_to_transcript_and_binds_tape() {
+        use crate::host::tape::OracleTape;
+
+        let host = AttestingHost {
+            response: make_response_table(),
+            attestation: b"provider-sig".to_vec(),
+        };
+        let mut registry = ToolRegistry::new(host);
+        let mut gas = make_gas();
+        let mut transcript = Transcript::new();
+        let config = make_config();
+        let args = make_empty_table();
+
+        registry
+            .call("http_get", &args, &config, &mut gas, &mut transcript)
+            .unwrap();
+
+        // Attestation reached the transcript record verbatim.
+        assert_eq!(transcript.records()[0].attestation, b"provider-sig");
+
+        // And it binds the tape's provenance commitment: the same responses
+        // without an attestation produce a different commitment.
+        let attested = OracleTape::from_records(transcript.records());
+        let mut plain = Transcript::new();
+        let mut plain_registry = ToolRegistry::new(MockHost::ok(make_response_table()));
+        plain_registry
+            .call("http_get", &args, &config, &mut gas, &mut plain)
+            .unwrap();
+        let unattested = OracleTape::from_records(plain.records());
+
+        assert_ne!(
+            attested.attestation_commitment(),
+            unattested.attestation_commitment()
+        );
+        // The existing tool_responses_hash is unaffected by the attestation.
+        assert_eq!(attested.commitment_hash(), unattested.commitment_hash());
     }
 
     #[test]

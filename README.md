@@ -35,10 +35,21 @@ It does **not** yet prove:
 That second property — **data provenance** — is the hard half of the oracle
 problem. The computation-integrity half is real and useful on its own (verifiable
 custom aggregation over *signed* inputs already composes cleanly with first-party
-oracles). Closing the provenance gap is the roadmap: **verifiable sourcing** via TLS
-attestation / zkTLS inside the VM's tool-call boundary, so a proof can attest to
-both *"computed correctly"* and *"over data that genuinely came from source X."*
-See `docs/tls-attestation.md` for the current attestation work.
+oracles).
+
+Provenance is **delegated, not deferred.** Proveno does not *produce* authenticity
+attestations — it *binds* them. Every tool call can carry an opaque attestation
+blob sourced by an external provider (a signed feed payload, a zkTLS / TLS-notary
+proof); the `attestation_hash` public input commits, per call, to that blob welded
+to the exact response bytes it covers (`OracleTape::attestation_commitment`). The
+circuit does **not** verify the blob — production is the provider's job, and a
+downstream consumer that trusts the provider checks it against the response it
+covers. This means an attestation cannot be re-presented over different responses
+than those actually executed. The boundary where a provider plugs in is
+`HostInterface::take_attestation`. Concrete providers (Pyth signatures, a zkTLS
+network) are follow-on work; the binding interface is shipped. The `src/tls`
+P-256/zkTLS machinery remains as one such attestation *producer*, now decoupled
+from the public input. See `docs/tls-attestation.md` for that producer.
 
 Proveno is **complementary** to Chainlink/Pyth-style oracles, not a replacement: it
 adds a programmable, proven-computation layer between raw (ideally signed) data and
@@ -106,12 +117,32 @@ host/            — HostInterface for tool calls; transcript recording;
 ```
 
 Public inputs commit to: program hash, input hash, tool responses hash, output
-hash, TLS attestation hash, policy hash (plus `num_steps` and `return_value`).
+hash, attestation hash (bind-only per-call provenance), policy hash (plus
+`num_steps` and `return_value`).
+
+### Toolchain versions
+
+The Noir proving path is pinned to a specific toolchain. The circuit, the
+checked-in `contracts/src/HonkVerifier.sol`, and the proof fixtures under
+`contracts/test/fixtures/` are all generated with:
+
+| Tool | Version |
+|------|---------|
+| `nargo` | `1.0.0-beta.18` |
+| `bb` (Barretenberg) | `3.0.0` |
+| `poseidon` (Noir lib, `noir/Nargo.toml`) | `v0.2.6` |
+
+Other `nargo`/`bb` versions are **not** supported — newer `nargo` changed the
+`poseidon2_permutation` signature (breaking `poseidon v0.2.6`), and `bb` emits a
+different verifier/proof format per version. If you upgrade, you must regenerate
+the verifier contract and fixtures together (see
+`contracts/test/fixtures/README.md`).
 
 ### Quick start: prove and verify a Lua program
 
 End-to-end demo against a local anvil chain. Requires `nargo`, `bb`, `forge`,
-`cast`, `anvil`, and `jq` on `PATH`, plus `ANTHROPIC_API_KEY`.
+`cast`, `anvil`, and `jq` on `PATH` (see pinned versions above), plus
+`ANTHROPIC_API_KEY`.
 
 ```bash
 # 1. (one terminal) build everything once so the demo doesn't time out on cargo
@@ -210,7 +241,7 @@ This produces `proof-output/compiled.json` and `proof-output/dry_result.json` �
 
 A third party can verify the proof without trusting the executor. The execution is deterministic: given the same program and oracle tape, anyone can replay it and get the identical result.
 
-**Current trust boundary:** The ZK proof guarantees computational integrity — that the program ran correctly and produced the claimed output from the claimed inputs. It does not yet guarantee data provenance (that API responses came from the real servers). TLS attestation (verifying server certificates inside the VM) is planned to close this gap.
+**Current trust boundary:** The ZK proof guarantees computational integrity — that the program ran correctly and produced the claimed output from the claimed inputs. It does not by itself guarantee data provenance (that API responses came from the real servers). Provenance is **delegated**: each tool call can carry an external provider's attestation, which the proof *binds* to the response bytes via the `attestation_hash` public input (committed, not verified in-circuit). A consumer that trusts the provider verifies the attestation against the bound response. Wiring concrete providers (Pyth signatures, a zkTLS network) at the `HostInterface::take_attestation` boundary is follow-on work; the binding is shipped.
 
 ### Benchmarks: proveno vs LangChain ReAct
 

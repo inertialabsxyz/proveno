@@ -23,7 +23,7 @@ fn noir_and_openvm_produce_identical_public_inputs() {
     let program_hash = bytecode.program_hash;
 
     // OpenVM public inputs path.
-    let openvm_pi = compute_public_inputs(program_hash, &input_value, &tape, &output, &[]);
+    let openvm_pi = compute_public_inputs(program_hash, &input_value, &tape, &output);
 
     // Noir witness path.
     let ret = match &output.return_value {
@@ -37,7 +37,6 @@ fn noir_and_openvm_produce_identical_public_inputs() {
         &tape,
         &input_value,
         &output,
-        &[],
         [0u8; 32],
     )
     .unwrap();
@@ -59,8 +58,8 @@ fn noir_and_openvm_produce_identical_public_inputs() {
         "output_hash mismatch"
     );
     assert_eq!(
-        witness.tls_attestation_hash, openvm_pi.tls_attestation_hash,
-        "tls_attestation_hash mismatch"
+        witness.attestation_hash, openvm_pi.attestation_hash,
+        "attestation_hash mismatch"
     );
     assert_eq!(
         witness.policy_hash, openvm_pi.policy_hash,

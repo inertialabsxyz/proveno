@@ -7,20 +7,16 @@
 //!   - what input it received (`input_hash`)
 //!   - which tool responses were consumed (`tool_responses_hash`)
 //!   - what outputs were produced (`output_hash`)
-//!   - TLS attestation over any HTTPS tool calls (`tls_attestation_hash`)
+//!   - per-call provenance attestations bound to those responses (`attestation_hash`)
 //!   - execution policy (`policy_hash`, Phase 2 stub)
 
 use sha2::{Digest, Sha256};
 
 use crate::{
     host::{canonicalize::canonical_serialize, tape::OracleTape},
-    tls::{TlsAttestationRecord, compute_tls_attestation_hash},
     types::value::LuaValue,
     vm::engine::VmOutput,
 };
-
-#[cfg(test)]
-use crate::tls::empty_tls_attestation_hash;
 
 /// The public commitments attested by a zkVM proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,11 +35,14 @@ pub struct PublicInputs {
     /// SHA-256 over `return_value || length-prefixed logs || transcript entries`.
     pub output_hash: [u8; 32],
 
-    /// Poseidon2 commitment over the SEC1 (x || y) pubkey halves of every
-    /// P-256-verified cert in chain order. The empty-attestation case returns
-    /// `tls::empty_tls_attestation_hash()` — the canonical `Poseidon2::hash([], 0)`
-    /// digest, NOT `[0u8; 32]`.
-    pub tls_attestation_hash: [u8; 32],
+    /// Bind-only provenance commitment: per-call Poseidon2 over each response
+    /// leaf welded to the attestation blob the host sourced for it
+    /// (`OracleTape::attestation_commitment()`). The attestation bytes are
+    /// *committed, not verified* — production is delegated to external providers
+    /// (signed feeds, zkTLS); a downstream consumer that trusts the provider
+    /// verifies them. With no attestations this is the canonical
+    /// `Poseidon2::hash([], 0)` digest, NOT `[0u8; 32]`.
+    pub attestation_hash: [u8; 32],
 
     /// SHA-256 of the canonical encoding of the `OraclePolicy` document.
     /// Zero until Phase 2 populates this field.
@@ -100,19 +99,22 @@ pub fn hash_output(output: &VmOutput) -> [u8; 32] {
 ///
 /// `policy_hash` is `[0u8; 32]` (no-policy stub). Use
 /// `compute_public_inputs_with_policy` when a real policy is in force.
+///
+/// `attestation_hash` is derived from the oracle tape: each recorded response
+/// is bound to the provenance attestation the host sourced for it (empty when
+/// none). See `OracleTape::attestation_commitment`.
 pub fn compute_public_inputs(
     program_hash: [u8; 32],
     input_value: &LuaValue,
     oracle_tape: &OracleTape,
     output: &VmOutput,
-    tls_attestations: &[TlsAttestationRecord],
 ) -> PublicInputs {
     PublicInputs {
         program_hash,
         input_hash: hash_input(input_value),
         tool_responses_hash: oracle_tape.commitment_hash(),
         output_hash: hash_output(output),
-        tls_attestation_hash: compute_tls_attestation_hash(tls_attestations),
+        attestation_hash: oracle_tape.attestation_commitment(),
         policy_hash: [0u8; 32],
     }
 }
@@ -127,7 +129,6 @@ pub fn compute_public_inputs_with_policy(
     input_value: &LuaValue,
     oracle_tape: &OracleTape,
     output: &VmOutput,
-    tls_attestations: &[TlsAttestationRecord],
     policy: &crate::policy::OraclePolicy,
 ) -> PublicInputs {
     PublicInputs {
@@ -135,7 +136,7 @@ pub fn compute_public_inputs_with_policy(
         input_hash: hash_input(input_value),
         tool_responses_hash: oracle_tape.commitment_hash(),
         output_hash: hash_output(output),
-        tls_attestation_hash: compute_tls_attestation_hash(tls_attestations),
+        attestation_hash: oracle_tape.attestation_commitment(),
         policy_hash: policy.policy_hash(),
     }
 }
@@ -204,14 +205,14 @@ mod tests {
         let program_hash = [1u8; 32];
         let input = LuaValue::Integer(42);
 
-        let pi = compute_public_inputs(program_hash, &input, &tape, &output, &[]);
+        let pi = compute_public_inputs(program_hash, &input, &tape, &output);
         assert_eq!(pi.program_hash, program_hash);
         assert_eq!(pi.input_hash, hash_input(&input));
         assert_eq!(pi.tool_responses_hash, tape.commitment_hash());
         assert_eq!(pi.output_hash, hash_output(&output));
-        // Empty attestations produce the canonical Poseidon2 empty-input hash,
-        // matching what the Noir circuit computes with `num_certs == 0`.
-        assert_eq!(pi.tls_attestation_hash, empty_tls_attestation_hash());
+        // With no recorded calls, the attestation commitment is the tape's
+        // canonical empty Poseidon2 digest (matching the circuit at num_tool_calls == 0).
+        assert_eq!(pi.attestation_hash, tape.attestation_commitment());
         assert_eq!(pi.policy_hash, [0u8; 32]);
     }
 
@@ -219,7 +220,7 @@ mod tests {
     fn compute_public_inputs_policy_hash_is_zero_without_policy() {
         let tape = OracleTape::new();
         let output = make_output(LuaValue::Nil);
-        let pi = compute_public_inputs([0u8; 32], &LuaValue::Nil, &tape, &output, &[]);
+        let pi = compute_public_inputs([0u8; 32], &LuaValue::Nil, &tape, &output);
         assert_eq!(pi.policy_hash, [0u8; 32]);
     }
 
@@ -232,14 +233,8 @@ mod tests {
         let output = make_output(LuaValue::Nil);
         let policy = constrained_http_v1();
 
-        let pi = compute_public_inputs_with_policy(
-            [0u8; 32],
-            &LuaValue::Nil,
-            &tape,
-            &output,
-            &[],
-            &policy,
-        );
+        let pi =
+            compute_public_inputs_with_policy([0u8; 32], &LuaValue::Nil, &tape, &output, &policy);
         assert_ne!(pi.policy_hash, [0u8; 32]);
         assert_eq!(pi.policy_hash, policy.policy_hash());
     }
@@ -253,22 +248,10 @@ mod tests {
         let output = make_output(LuaValue::Nil);
         let policy = template_price_feed_v1();
 
-        let pi1 = compute_public_inputs_with_policy(
-            [0u8; 32],
-            &LuaValue::Nil,
-            &tape,
-            &output,
-            &[],
-            &policy,
-        );
-        let pi2 = compute_public_inputs_with_policy(
-            [0u8; 32],
-            &LuaValue::Nil,
-            &tape,
-            &output,
-            &[],
-            &policy,
-        );
+        let pi1 =
+            compute_public_inputs_with_policy([0u8; 32], &LuaValue::Nil, &tape, &output, &policy);
+        let pi2 =
+            compute_public_inputs_with_policy([0u8; 32], &LuaValue::Nil, &tape, &output, &policy);
         assert_eq!(pi1.policy_hash, pi2.policy_hash);
     }
 }

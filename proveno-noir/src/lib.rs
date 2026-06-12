@@ -4,7 +4,7 @@ pub mod witness;
 use std::path::PathBuf;
 
 use proveno::{
-    OracleTape, TapeHost, Vm, VmConfig, compiler::CompiledProgram, noir::encoder::encode_program,
+    TapeHost, Vm, VmConfig, compiler::CompiledProgram, noir::encoder::encode_program,
     types::value::LuaValue,
 };
 use proveno_prover::prover::DryRunResult;
@@ -44,7 +44,6 @@ pub fn prove_from_artifacts(
         encode_program(compiled).map_err(|e| ProveOutputError::Encode(format!("{e:?}")))?;
 
     let policy_hash = dry_result.public_inputs.policy_hash;
-    let tls_attestations = dry_result.tls_attestations.clone();
     let oracle_tape = dry_result.oracle_tape.clone();
 
     // Re-execute against the oracle tape to record the instruction trace.
@@ -60,16 +59,19 @@ pub fn prove_from_artifacts(
         LuaValue::Integer(n) => *n,
         _ => 0,
     };
-    let replay_tape = OracleTape::from_records(&output.transcript);
 
+    // Build the witness from the original tape (not a tape rebuilt from the
+    // replay transcript): replay through `TapeHost` reproduces responses but
+    // not the per-call attestation blobs, which only the original tape carries.
+    // Responses are identical by determinism, so `tool_responses_hash` is
+    // unchanged; using the original tape additionally preserves provenance.
     let witness = build_witness(
         &bytecode,
         &output.trace,
         return_val,
-        &replay_tape,
+        &dry_result.oracle_tape,
         &LuaValue::Nil,
         &output,
-        &tls_attestations,
         policy_hash,
     )
     .map_err(ProveOutputError::Witness)?;

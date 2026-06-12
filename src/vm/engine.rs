@@ -151,6 +151,21 @@ pub struct VmOutput {
 
 pub trait HostInterface {
     fn call_tool(&mut self, name: &str, args: &LuaTable) -> Result<LuaTable, String>;
+
+    /// Provenance attestation for the most recent successful `call_tool`, if the
+    /// host sourced one (e.g. a signed feed payload or a zkTLS proof).
+    ///
+    /// Bind-only model: the returned bytes are an opaque blob that gets
+    /// *committed* alongside the response bytes — Proveno does not verify the
+    /// attestation here. Producing it is delegated to an external provider;
+    /// verifying it is the job of a downstream consumer that trusts that
+    /// provider. Returns `None` when the host sourced no attestation.
+    ///
+    /// The registry queries this once, immediately after a successful call.
+    /// Default `None` keeps hosts that don't source attestations unchanged.
+    fn take_attestation(&mut self) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 pub struct NoopHost;

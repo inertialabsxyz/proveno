@@ -9,7 +9,7 @@
 //! [input_hash: 32]
 //! [tool_responses_hash: 32]
 //! [output_hash: 32]
-//! [tls_attestation_hash: 32]
+//! [attestation_hash: 32]
 //! [policy_hash: 32]
 //! [proof_blob_len: 4 LE]
 //! [proof_blob: N]         OpenVM ZK proof bytes (or test fixture bytes)
@@ -127,7 +127,7 @@ pub fn verify_proof(
         input_hash: read32(&mut offset),
         tool_responses_hash: read32(&mut offset),
         output_hash: read32(&mut offset),
-        tls_attestation_hash: read32(&mut offset),
+        attestation_hash: read32(&mut offset),
         policy_hash: read32(&mut offset),
     };
 
@@ -185,7 +185,7 @@ pub fn build_test_proof(public_inputs: &PublicInputs, proof_blob: &[u8]) -> Vec<
     buf.extend_from_slice(&public_inputs.input_hash);
     buf.extend_from_slice(&public_inputs.tool_responses_hash);
     buf.extend_from_slice(&public_inputs.output_hash);
-    buf.extend_from_slice(&public_inputs.tls_attestation_hash);
+    buf.extend_from_slice(&public_inputs.attestation_hash);
     buf.extend_from_slice(&public_inputs.policy_hash);
     buf.extend_from_slice(&(proof_blob.len() as u32).to_le_bytes());
     buf.extend_from_slice(proof_blob);
@@ -204,7 +204,7 @@ mod tests {
             input_hash: [2u8; 32],
             tool_responses_hash: [3u8; 32],
             output_hash: [4u8; 32],
-            tls_attestation_hash: [0u8; 32],
+            attestation_hash: [0u8; 32],
             policy_hash,
         }
     }

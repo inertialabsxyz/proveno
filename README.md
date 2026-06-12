@@ -120,10 +120,29 @@ Public inputs commit to: program hash, input hash, tool responses hash, output
 hash, attestation hash (bind-only per-call provenance), policy hash (plus
 `num_steps` and `return_value`).
 
+### Toolchain versions
+
+The Noir proving path is pinned to a specific toolchain. The circuit, the
+checked-in `contracts/src/HonkVerifier.sol`, and the proof fixtures under
+`contracts/test/fixtures/` are all generated with:
+
+| Tool | Version |
+|------|---------|
+| `nargo` | `1.0.0-beta.18` |
+| `bb` (Barretenberg) | `3.0.0` |
+| `poseidon` (Noir lib, `noir/Nargo.toml`) | `v0.2.6` |
+
+Other `nargo`/`bb` versions are **not** supported — newer `nargo` changed the
+`poseidon2_permutation` signature (breaking `poseidon v0.2.6`), and `bb` emits a
+different verifier/proof format per version. If you upgrade, you must regenerate
+the verifier contract and fixtures together (see
+`contracts/test/fixtures/README.md`).
+
 ### Quick start: prove and verify a Lua program
 
 End-to-end demo against a local anvil chain. Requires `nargo`, `bb`, `forge`,
-`cast`, `anvil`, and `jq` on `PATH`, plus `ANTHROPIC_API_KEY`.
+`cast`, `anvil`, and `jq` on `PATH` (see pinned versions above), plus
+`ANTHROPIC_API_KEY`.
 
 ```bash
 # 1. (one terminal) build everything once so the demo doesn't time out on cargo

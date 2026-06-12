@@ -7,7 +7,7 @@ fn make_public_inputs(policy_hash: [u8; 32]) -> PublicInputs {
         input_hash: [2u8; 32],
         tool_responses_hash: [3u8; 32],
         output_hash: [4u8; 32],
-        tls_attestation_hash: [0u8; 32],
+        attestation_hash: [0u8; 32],
         policy_hash,
     }
 }

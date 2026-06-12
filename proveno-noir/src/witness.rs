@@ -3,7 +3,6 @@ use std::path::Path;
 
 use proveno::noir::encoder::NoirBytecode;
 use proveno::noir::trace::TraceStep;
-use proveno::tls::{TlsAttestationRecord, empty_tls_attestation_hash};
 use proveno::types::value::LuaValue;
 use proveno::vm::engine::VmOutput;
 use proveno::zkvm::commitment::{hash_input, hash_output};
@@ -13,7 +12,6 @@ pub const MAX_BYTECODE: usize = 512;
 pub const MAX_STEPS: usize = 2048;
 pub const MAX_TOOL_CALLS: usize = 16;
 pub const MAX_TAPE_ENTRY_BYTES: usize = 1024;
-pub const MAX_CERTS: usize = 4;
 
 pub struct NoirWitness {
     pub bytecode_opcodes: [u8; MAX_BYTECODE],
@@ -32,16 +30,15 @@ pub struct NoirWitness {
     pub tape_entry_data: [[u8; MAX_TAPE_ENTRY_BYTES]; MAX_TOOL_CALLS],
     pub num_tool_calls: u32,
     pub tool_responses_hash: [u8; 32],
-    // TLS attestation witnesses (zeroed when no verified certs)
-    pub cert_public_key_x: [[u8; 32]; MAX_CERTS],
-    pub cert_public_key_y: [[u8; 32]; MAX_CERTS],
-    pub cert_signatures: [[u8; 64]; MAX_CERTS],
-    pub cert_msg_hashes: [[u8; 32]; MAX_CERTS],
-    pub num_certs: u32,
+    // Bind-only provenance: per-call attestation leaf (Poseidon2 over the
+    // attestation blob), serialized big-endian. The circuit binds each to the
+    // response leaf it computes; the raw blob stays off-circuit. Zeroed leaves
+    // for calls without an attestation are the canonical empty-blob leaf.
+    pub tape_attestation_leaves: [[u8; 32]; MAX_TOOL_CALLS],
     // Additional public input hashes
     pub input_hash: [u8; 32],
     pub output_hash: [u8; 32],
-    pub tls_attestation_hash: [u8; 32],
+    pub attestation_hash: [u8; 32],
     pub policy_hash: [u8; 32],
 }
 
@@ -67,10 +64,10 @@ impl std::error::Error for WitnessError {}
 /// Returns a heap-allocated witness to avoid placing ~480 KB of fixed-size
 /// arrays on the test-thread stack (default 2 MB on macOS).
 ///
-/// `tls_attestation_hash` is `empty_tls_attestation_hash()` and `num_certs` is 0
-/// for all inputs; full TLS circuit witnesses (pubkey extraction from DER) are
-/// a future phase. The circuit's `Poseidon2::hash(tls_fields, num_certs * 64)`
-/// with `num_certs = 0` produces exactly that sentinel.
+/// `attestation_hash` is the oracle tape's bind-only provenance commitment;
+/// the per-call attestation leaves it binds are carried in
+/// `tape_attestation_leaves` (the canonical empty-blob leaf for calls with no
+/// attestation).
 pub fn build_witness(
     bytecode: &NoirBytecode,
     trace: &[TraceStep],
@@ -78,7 +75,6 @@ pub fn build_witness(
     oracle_tape: &OracleTape,
     input_value: &LuaValue,
     output: &VmOutput,
-    _tls_attestations: &[TlsAttestationRecord],
     policy_hash: [u8; 32],
 ) -> Result<Box<NoirWitness>, WitnessError> {
     if trace.len() > MAX_STEPS {
@@ -137,12 +133,18 @@ pub fn build_witness(
     w.num_tool_calls = oracle_tape.entries.len().min(MAX_TOOL_CALLS) as u32;
     w.tool_responses_hash = oracle_tape.commitment_hash();
 
-    // TLS: full P-256 cert witnesses are not yet wired up. The circuit hashes
-    // zero cert bytes via Poseidon2 and asserts the result equals the public
-    // `tls_attestation_hash`, so the witness must use the canonical empty
-    // sentinel (NOT `[0u8; 32]`).
-    w.num_certs = 0;
-    w.tls_attestation_hash = empty_tls_attestation_hash();
+    // Bind-only provenance: per-call attestation leaves + the commitment that
+    // binds each to its response leaf. With no attestations, every leaf is the
+    // canonical empty-blob leaf and `attestation_hash` is the empty-tape digest.
+    for (i, leaf) in oracle_tape
+        .attestation_leaves_be()
+        .into_iter()
+        .enumerate()
+        .take(MAX_TOOL_CALLS)
+    {
+        w.tape_attestation_leaves[i] = leaf;
+    }
+    w.attestation_hash = oracle_tape.attestation_commitment();
 
     // Public input hashes.
     w.input_hash = hash_input(input_value);
@@ -175,8 +177,8 @@ pub fn write_prover_toml(witness: &NoirWitness, path: &Path) -> io::Result<()> {
         bytes_toml(&witness.output_hash)
     ));
     out.push_str(&format!(
-        "tls_attestation_hash = [{}]\n",
-        bytes_toml(&witness.tls_attestation_hash)
+        "attestation_hash = [{}]\n",
+        bytes_toml(&witness.attestation_hash)
     ));
     out.push_str(&format!(
         "policy_hash = [{}]\n",
@@ -226,23 +228,9 @@ pub fn write_prover_toml(witness: &NoirWitness, path: &Path) -> io::Result<()> {
         "tape_entry_data = [{}]\n",
         rows_toml(witness.tape_entry_data.iter().map(|r| r.as_slice()))
     ));
-
-    out.push_str(&format!("num_certs = {}\n", witness.num_certs));
     out.push_str(&format!(
-        "cert_public_key_x = [{}]\n",
-        rows_toml(witness.cert_public_key_x.iter().map(|r| r.as_slice()))
-    ));
-    out.push_str(&format!(
-        "cert_public_key_y = [{}]\n",
-        rows_toml(witness.cert_public_key_y.iter().map(|r| r.as_slice()))
-    ));
-    out.push_str(&format!(
-        "cert_signatures = [{}]\n",
-        rows_toml(witness.cert_signatures.iter().map(|r| r.as_slice()))
-    ));
-    out.push_str(&format!(
-        "cert_msg_hashes = [{}]\n",
-        rows_toml(witness.cert_msg_hashes.iter().map(|r| r.as_slice()))
+        "tape_attestation_leaves = [{}]\n",
+        rows_toml(witness.tape_attestation_leaves.iter().map(|r| r.as_slice()))
     ));
 
     std::fs::write(path, out)
@@ -316,7 +304,6 @@ mod tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();
@@ -327,8 +314,11 @@ mod tests {
             bytecode.opcodes[0..bytecode.instr_count]
         );
         assert_eq!(witness.num_tool_calls, 0);
-        assert_eq!(witness.num_certs, 0);
-        assert_eq!(witness.tls_attestation_hash, empty_tls_attestation_hash());
+        // No tool calls → bind-only commitment is the empty-tape digest.
+        assert_eq!(
+            witness.attestation_hash,
+            OracleTape::new().attestation_commitment()
+        );
         assert_eq!(witness.policy_hash, [0u8; 32]);
     }
 
@@ -352,7 +342,6 @@ mod tests {
                 &OracleTape::new(),
                 &LuaValue::Nil,
                 &output,
-                &[],
                 [0u8; 32]
             )
             .is_err()
@@ -370,7 +359,6 @@ mod tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();
@@ -387,11 +375,9 @@ mod tests {
         assert!(contents.contains("tape_entry_data = ["));
         assert!(contents.contains("input_hash = ["));
         assert!(contents.contains("output_hash = ["));
-        assert!(contents.contains("tls_attestation_hash = ["));
+        assert!(contents.contains("attestation_hash = ["));
         assert!(contents.contains("policy_hash = ["));
-        assert!(contents.contains("num_certs ="));
-        assert!(contents.contains("cert_public_key_x = ["));
-        assert!(contents.contains("cert_signatures = ["));
+        assert!(contents.contains("tape_attestation_leaves = ["));
     }
 
     #[test]
@@ -405,7 +391,6 @@ mod tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();
@@ -429,7 +414,6 @@ mod tests {
             &tape,
             &LuaValue::Integer(7),
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();
@@ -451,7 +435,6 @@ mod tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             policy,
         )
         .unwrap();

@@ -8,7 +8,6 @@ global MAX_TAPE_ENTRY_BYTES: u32 = 1024;
 global MAX_BYTECODE_FIELDS: u32 = MAX_BYTECODE * 2;
 // Per-entry Poseidon2 input vector: tag || len || payload bytes (one Field each).
 global MAX_TAPE_ENTRY_FIELDS: u32 = MAX_TAPE_ENTRY_BYTES + 2;
-global MAX_CERTS: u32 = 4;
 
 // Decode a 32-byte big-endian array into a single Field. Mirrors
 // `field_to_be_bytes32` on the Rust side, used to bridge the [u8; 32]
@@ -60,13 +59,9 @@ fn main(
     tool_responses_hash: pub [u8; 32],
     input_hash: pub [u8; 32],
     output_hash: pub [u8; 32],
-    tls_attestation_hash: pub [u8; 32],
+    attestation_hash: pub [u8; 32],
     policy_hash: pub [u8; 32],
-    cert_public_key_x: [[u8; 32]; MAX_CERTS],
-    cert_public_key_y: [[u8; 32]; MAX_CERTS],
-    cert_signatures: [[u8; 64]; MAX_CERTS],
-    cert_msg_hashes: [[u8; 32]; MAX_CERTS],
-    num_certs: u32,
+    tape_attestation_leaves: [[u8; 32]; MAX_TOOL_CALLS],
 ) {
     assert_bytecode(
         bytecode_opcodes,
@@ -153,7 +148,7 @@ fn main(
     //    `len + 2 = 2`, but the resulting leaf is overwritten in `leaves`
     //    only for live slots, so it can't leak into the outer commitment.
     assert(tool_call_count == num_tool_calls);
-    let mut leaves: [Field; MAX_TOOL_CALLS] = [0; MAX_TOOL_CALLS];
+    let mut resp_leaves: [Field; MAX_TOOL_CALLS] = [0; MAX_TOOL_CALLS];
     for i in 0..MAX_TOOL_CALLS {
         let len = tape_entry_lengths[i];
         let mut entry_fields: [Field; MAX_TAPE_ENTRY_FIELDS] = [0; MAX_TAPE_ENTRY_FIELDS];
@@ -162,33 +157,32 @@ fn main(
         for j in 0..MAX_TAPE_ENTRY_BYTES {
             entry_fields[2 + j] = tape_entry_data[i][j] as Field;
         }
-        leaves[i] = Poseidon2::hash(entry_fields, len + 2);
+        resp_leaves[i] = Poseidon2::hash(entry_fields, len + 2);
     }
-    let computed = Poseidon2::hash(leaves, num_tool_calls);
+    let computed = Poseidon2::hash(resp_leaves, num_tool_calls);
     assert(computed == be_bytes32_to_field(tool_responses_hash));
 
-    // 7. TLS attestation verification.
-    //    For each cert i < num_certs: verify P-256 ECDSA signature, then
-    //    accumulate the cert public-key bytes (x || y) into a Poseidon2 input
-    //    vector, one byte per Field, matching the oracle-tape commitment
-    //    convention. The hash count is `num_certs * 64`, so padded slots
-    //    contribute no live input. The empty-cert case naturally produces
-    //    `Poseidon2::hash([], 0)` (no special branch needed).
-    let mut tls_fields: [Field; 256] = [0; 256]; // MAX_CERTS * 64
-    for i in 0..MAX_CERTS {
-        if (i as u32) < num_certs {
-            assert(std::ecdsa_secp256r1::verify_signature(
-                cert_public_key_x[i],
-                cert_public_key_y[i],
-                cert_signatures[i],
-                cert_msg_hashes[i],
-            ));
-            for j in 0..32 {
-                tls_fields[i * 64 + j] = cert_public_key_x[i][j] as Field;
-                tls_fields[i * 64 + 32 + j] = cert_public_key_y[i][j] as Field;
-            }
-        }
+    // 8. Bind-only provenance commitment (delegated-production model).
+    //    Each call's response leaf (computed above) is bound to a per-call
+    //    attestation leaf: a pass-through commitment to whatever provenance
+    //    blob the host sourced (a signed feed payload, a zkTLS proof, ...). The
+    //    circuit does NOT verify the attestation; it only welds it to the exact
+    //    response bytes, so a downstream consumer that trusts the provider can
+    //    check the blob against the response it covers, and cannot have the
+    //    attestation re-presented over different responses than those executed.
+    //
+    //        bound_leaf_i = Poseidon2( resp_leaf_i, att_leaf_i )
+    //        commitment   = Poseidon2( bound_leaf_0, ..., bound_leaf_n-1 )
+    //
+    //    att_leaf_i arrives as a 32-byte big-endian Field witness rather than
+    //    raw bytes, so the (unverified) blob never enters the circuit. Padded
+    //    slots are excluded by the num_tool_calls message size, exactly as the
+    //    response commitment above; the empty-tape case yields Poseidon2([], 0).
+    let mut bound_leaves: [Field; MAX_TOOL_CALLS] = [0; MAX_TOOL_CALLS];
+    for i in 0..MAX_TOOL_CALLS {
+        let att_leaf = be_bytes32_to_field(tape_attestation_leaves[i]);
+        bound_leaves[i] = Poseidon2::hash([resp_leaves[i], att_leaf], 2);
     }
-    let computed_tls_hash = Poseidon2::hash(tls_fields, num_certs * 64);
-    assert(computed_tls_hash == be_bytes32_to_field(tls_attestation_hash));
+    let computed_attestation = Poseidon2::hash(bound_leaves, num_tool_calls);
+    assert(computed_attestation == be_bytes32_to_field(attestation_hash));
 }

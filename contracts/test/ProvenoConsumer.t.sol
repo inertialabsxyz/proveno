@@ -100,7 +100,7 @@ contract ProvenoConsumerTest is Test {
             toolResponsesHash: vm.parseJsonBytes32(json, ".toolResponsesHash"),
             inputHash: vm.parseJsonBytes32(json, ".inputHash"),
             outputHash: vm.parseJsonBytes32(json, ".outputHash"),
-            tlsAttestationHash: vm.parseJsonBytes32(json, ".tlsAttestationHash"),
+            attestationHash: vm.parseJsonBytes32(json, ".attestationHash"),
             policyHash: vm.parseJsonBytes32(json, ".policyHash")
         });
     }

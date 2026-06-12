@@ -115,7 +115,6 @@ mod nargo_tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();
@@ -144,7 +143,6 @@ mod nargo_tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();
@@ -180,7 +178,6 @@ mod nargo_tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();
@@ -212,7 +209,6 @@ mod nargo_tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();
@@ -245,7 +241,6 @@ mod nargo_tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();
@@ -284,7 +279,6 @@ mod nargo_tests {
             &tape,
             &LuaValue::Nil,
             &output,
-            &[],
             [0u8; 32],
         )
         .unwrap();

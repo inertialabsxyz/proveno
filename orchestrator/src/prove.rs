@@ -27,7 +27,7 @@ pub struct NoirProveSummary {
     pub proof_bytes: Vec<u8>,
     /// 8-element `bytes32[]` in circuit-declaration order:
     /// `[num_steps, program_hash, return_value, tool_responses_hash,
-    ///   input_hash, output_hash, tls_attestation_hash, policy_hash]`.
+    ///   input_hash, output_hash, attestation_hash, policy_hash]`.
     /// Each element is a 0x-prefixed 32-byte hex string.
     pub public_inputs_hex: Vec<String>,
     pub prove_duration_ms: u128,
@@ -53,14 +53,8 @@ pub fn build_proof_artifacts(
     // Build oracle tape from transcript
     let oracle_tape = OracleTape::from_records(&output.transcript);
 
-    // Compute public inputs (commitment hashes including TLS attestation)
-    let public_inputs = compute_public_inputs(
-        program.program_hash,
-        input,
-        &oracle_tape,
-        &output,
-        &tls_attestations,
-    );
+    // Compute public inputs (commitment hashes, incl. bind-only attestation)
+    let public_inputs = compute_public_inputs(program.program_hash, input, &oracle_tape, &output);
 
     // Assemble DryRunResult
     let dry_run_result = DryRunResult {
@@ -140,7 +134,7 @@ pub fn build_proof_artifacts_with_noir(
                 bytes32_hex(&pi.tool_responses_hash),
                 bytes32_hex(&pi.input_hash),
                 bytes32_hex(&pi.output_hash),
-                bytes32_hex(&pi.tls_attestation_hash),
+                bytes32_hex(&pi.attestation_hash),
                 bytes32_hex(&pi.policy_hash),
             ];
             artifacts.noir_proof = Some(NoirProveSummary {
@@ -242,7 +236,7 @@ pub fn format_prove_section(artifacts: &ProveArtifacts) -> String {
                 "tool_responses_hash ",
                 "input_hash          ",
                 "output_hash         ",
-                "tls_attestation_hash",
+                "attestation_hash",
                 "policy_hash         ",
             ];
             for (label, hexstr) in LABELS.iter().zip(np.public_inputs_hex.iter()) {
@@ -385,7 +379,7 @@ return 1"#;
                 bytes32_hex(&artifacts.public_inputs.tool_responses_hash),
                 bytes32_hex(&artifacts.public_inputs.input_hash),
                 bytes32_hex(&artifacts.public_inputs.output_hash),
-                bytes32_hex(&artifacts.public_inputs.tls_attestation_hash),
+                bytes32_hex(&artifacts.public_inputs.attestation_hash),
                 bytes32_hex(&artifacts.public_inputs.policy_hash),
             ],
             prove_duration_ms: 1234,
@@ -471,13 +465,8 @@ return r.message"#;
         let output =
             pipeline::execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let oracle_tape = OracleTape::from_records(&output.transcript);
-        let pi_orchestrator = compute_public_inputs(
-            program.program_hash,
-            &LuaValue::Nil,
-            &oracle_tape,
-            &output,
-            &[],
-        );
+        let pi_orchestrator =
+            compute_public_inputs(program.program_hash, &LuaValue::Nil, &oracle_tape, &output);
 
         // Path 2: prover dry_run (no TLS attestations)
         let prover = Prover::new(VmConfig::default(), StubHost, vec!["echo".into()]);

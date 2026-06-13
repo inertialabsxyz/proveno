@@ -127,6 +127,8 @@ A verifiable task proves two things side by side, in one proof: **execution** (a
 
 The identity is horizontal — verifiable tasks are useful wherever a result must be trusted. On-chain verification (a contract acting on a task's proof, coprocessor-style) is its first high-value **application**, not its category. Proveno is **not an oracle**: it *touches* the oracle world by consuming attested inputs, but "oracle" promises data provenance, which is the provider's job, not proveno's. The zkVM is the proving **mechanism**, not the identity; the Noir backend could retarget without changing what proveno is.
 
+Trust is **cryptographic, not hardware** — no TEE/enclave, no special CPU; the proof verifies on any commodity machine and natively on-chain (unlike enclave attestations, which root trust in a hardware vendor). Caveats to keep honest in docs: this is integrity, not privacy; it is for bounded tasks; and "no trusted hardware" still relies on UltraHonk's one-time universal KZG SRS, not a per-circuit setup.
+
 The proof guarantees **computation integrity** (the program ran correctly over the inputs it was given), not **data provenance** (that those inputs are authentic data from the real source). Provenance is **delegated, not built**: the `attestation_hash` public input *binds* (does not verify) a per-call provider attestation to the response bytes it covers, via `OracleTape::attestation_commitment`; a provider plugs in at `HostInterface::take_attestation`. Concrete providers (Pyth signatures, zkTLS networks) are follow-on work. Keep this boundary honest in docs and code comments — the circuit binds blobs, it does not authenticate them.
 
 ### Execution pipeline

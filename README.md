@@ -20,6 +20,13 @@ coprocessor-style) is its first high-value **application**, not its category. Th
 zkVM is the proving **mechanism**, not the identity; "programs are data, not
 circuits," so a new task needs no new circuit.
 
+Trust comes from **cryptography, not hardware** — no TEE, no enclave, no special CPU.
+The proof is sound under cryptographic assumptions and verifies on any commodity
+machine, natively on-chain, where enclave attestations root trust in a hardware vendor
+and are awkward to check trustlessly. Three honest caveats: this is integrity, not
+privacy; it is for bounded tasks, not whole apps; and "no trusted hardware" still
+relies on a one-time universal SNARK setup (not a per-circuit one).
+
 Under the hood it is a from-scratch, deterministic, sandboxed Lua VM. Programs run
 as single-shot computations: they receive an input object, may invoke host-provided
 tools, and return a structured result. Given the same bytecode, inputs, and tool
@@ -66,6 +73,7 @@ on-chain action.
 - **Bounded** — gas, memory, depth, and output limits guarantee termination
 - **Integer-only arithmetic** — signed 64-bit; use fixed-point for fractional values
 - **ZK-provable** — two-phase execution model proved via Noir (`proveno-noir` + `nargo`/`bb`)
+- **No trusted hardware** — trust is cryptographic, not a TEE/enclave; runs on commodity machines and verifies natively on-chain
 
 ## What it's good for
 

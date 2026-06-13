@@ -1,18 +1,24 @@
 # Proveno
 
-**A programmable oracle: turn a simple program into a verifiable one.**
+**A verifiable worker: run a small program and prove it ran exactly as written.**
 
 You write straightforward logic in Lua. Proveno executes it deterministically
 off-chain, produces a zero-knowledge proof that *this exact program ran over
 these exact inputs and produced this exact output*, and a smart contract verifies
 that proof on-chain before acting on the result.
 
-Seen through an infrastructure lens, that is a **programmable oracle**: instead of
-trusting an operator or a committee to report a value, a contract trusts a *proof*
-that a known computation was performed correctly. The operator becomes
+Proveno is **light machinery for verifiable jobs**: a small, specific computation
+that fetches attested external inputs, runs deterministically, and emits a proof a
+third party can check. Instead of trusting an operator to report a result, a
+consumer trusts a *proof* that a known program ran correctly. The operator becomes
 interchangeable — anyone running the same program over the same inputs produces the
-same proof. The oracle isn't a fixed feed; it's **any deterministic computation you
-can express**, made verifiable.
+same proof.
+
+The identity is **horizontal** — a worker for verifiable jobs, useful wherever a
+result must be trusted. On-chain verification (a contract acting on a worker's proof,
+coprocessor-style) is its first high-value **application**, not its category. The
+zkVM is the proving **mechanism**, not the identity; "programs are data, not
+circuits," so a new job needs no new circuit.
 
 Under the hood it is a from-scratch, deterministic, sandboxed Lua VM. Programs run
 as single-shot computations: they receive an input object, may invoke host-provided
@@ -51,8 +57,9 @@ network) are follow-on work; the binding interface is shipped. The `src/tls`
 P-256/zkTLS machinery remains as one such attestation *producer*, now decoupled
 from the public input. See `docs/tls-attestation.md` for that producer.
 
-Proveno is **complementary** to Chainlink/Pyth-style oracles, not a replacement: it
-adds a programmable, proven-computation layer between raw (ideally signed) data and
+Proveno is **not an oracle** and does not replace Chainlink/Pyth — "oracle" promises
+data provenance, which is the provider's job, not proveno's. It is **complementary**:
+a programmable, proven-computation layer between raw (ideally signed) data and
 on-chain action.
 
 ## Key properties
@@ -62,6 +69,23 @@ on-chain action.
 - **Bounded** — gas, memory, depth, and output limits guarantee termination
 - **Integer-only arithmetic** — signed 64-bit; use fixed-point for fractional values
 - **ZK-provable** — two-phase execution model proved via Noir (`proveno-noir` + `nargo`/`bb`)
+
+## What it's good for
+
+The shape that fits: **a bounded job that applies a rule to fetched inputs, whose
+correct application matters to a third party who won't — or can't — re-run it.**
+A good proveno job is bounded, has logic whose correctness matters downstream,
+consumes external inputs, and survives proveno *not* vouching for the data's
+authenticity (the provider attests that — see the honest boundary above).
+
+- **Parametric payouts / settlement** — fetch a condition, apply the payout rule, a
+  contract pays out on the proof (generalizes prediction-market / parimutuel resolution).
+- **Eligibility & policy gating** — evaluate a rule set over fetched attributes
+  (airdrops, allowlists, underwriting, KYC); a contract gates a claim on the proof.
+- **Verifiable agent actions** — an LLM-authored job with deterministic control flow;
+  prove what the agent actually did, with every `llm_query` committed in the transcript.
+- **Auditable process** — prove a refund, royalty split, or fee was computed per the
+  documented rules; a proof-of-process for disputes and compliance, no chain required.
 
 ## Workspace
 
@@ -174,7 +198,7 @@ encoding-bridge caveat between `outputHash` (SHA-256) and the consumer's
 
 ## Orchestrator
 
-The orchestrator is one consumer of the oracle: it connects an LLM (Claude) to the
+The orchestrator is one way to drive the worker: it connects an LLM (Claude) to the
 Proveno VM so a natural-language task becomes a proven computation. The LLM authors
 the program; Proveno makes the result verifiable.
 

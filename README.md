@@ -1,24 +1,24 @@
 # Proveno
 
-**A verifiable worker: run a small program and prove it ran exactly as written.**
+**Verifiable tasks: write a task in Lua and prove it ran exactly as written.**
 
 You write straightforward logic in Lua. Proveno executes it deterministically
 off-chain, produces a zero-knowledge proof that *this exact program ran over
 these exact inputs and produced this exact output*, and a smart contract verifies
 that proof on-chain before acting on the result.
 
-Proveno is **light machinery for verifiable jobs**: a small, specific computation
-that fetches attested external inputs, runs deterministically, and emits a proof a
-third party can check. Instead of trusting an operator to report a result, a
-consumer trusts a *proof* that a known program ran correctly. The operator becomes
-interchangeable — anyone running the same program over the same inputs produces the
-same proof.
+Proveno runs **verifiable tasks**: small programs you write in plain Lua that hand
+back two things — the result, and a proof of exactly what they did. **If you can
+write a script, you can write a verifiable task** — no circuits, no cryptography.
+Instead of trusting an operator to report a result, a consumer trusts a *proof* that
+a known program ran correctly. The operator becomes interchangeable — anyone running
+the same task over the same inputs produces the same proof.
 
-The identity is **horizontal** — a worker for verifiable jobs, useful wherever a
-result must be trusted. On-chain verification (a contract acting on a worker's proof,
+The identity is **horizontal** — verifiable tasks are useful wherever a result must
+be trusted. On-chain verification (a contract acting on a task's proof,
 coprocessor-style) is its first high-value **application**, not its category. The
 zkVM is the proving **mechanism**, not the identity; "programs are data, not
-circuits," so a new job needs no new circuit.
+circuits," so a new task needs no new circuit.
 
 Under the hood it is a from-scratch, deterministic, sandboxed Lua VM. Programs run
 as single-shot computations: they receive an input object, may invoke host-provided
@@ -26,22 +26,19 @@ tools, and return a structured result. Given the same bytecode, inputs, and tool
 responses, execution is always identical — that determinism is the precondition for
 provability.
 
-## The honest boundary
+## Two guarantees, one proof
 
-A proof of correct execution is **not** a proof that the inputs were authentic.
-Proveno today proves:
+A verifiable task proves two things side by side, bound into a single proof:
 
-> *"The agreed program ran correctly over the inputs it was given, and produced
-> this output."*
+- **Execution — always.** *"The agreed program ran correctly over the inputs it was
+  given, and produced this output."* This is what proveno does on its own.
+- **Provenance — when a provider is attached.** *"Those inputs are the real data from
+  the real source."* The same proof attests it, once a provenance provider supplies the
+  attestation.
 
-It does **not** yet prove:
-
-> *"Those inputs are the real data from the real source."*
-
-That second property — **data provenance** — is the hard half of the oracle
-problem. The computation-integrity half is real and useful on its own (verifiable
-custom aggregation over *signed* inputs already composes cleanly with first-party
-oracles).
+Execution integrity is the floor, and is useful on its own — verifiable custom
+aggregation over *signed* inputs already composes cleanly with first-party oracles.
+Provenance completes the picture.
 
 Provenance is **delegated, not deferred.** Proveno does not *produce* authenticity
 attestations — it *binds* them. Every tool call can carry an opaque attestation
@@ -72,17 +69,17 @@ on-chain action.
 
 ## What it's good for
 
-The shape that fits: **a bounded job that applies a rule to fetched inputs, whose
+The shape that fits: **a bounded task that applies a rule to fetched inputs, whose
 correct application matters to a third party who won't — or can't — re-run it.**
-A good proveno job is bounded, has logic whose correctness matters downstream,
-consumes external inputs, and survives proveno *not* vouching for the data's
-authenticity (the provider attests that — see the honest boundary above).
+A good proveno task is bounded, has logic whose correctness matters downstream,
+consumes external inputs, and is useful from execution integrity alone — *gaining*
+provenance when a provider is attached (see "Two guarantees, one proof" above).
 
 - **Parametric payouts / settlement** — fetch a condition, apply the payout rule, a
   contract pays out on the proof (generalizes prediction-market / parimutuel resolution).
 - **Eligibility & policy gating** — evaluate a rule set over fetched attributes
   (airdrops, allowlists, underwriting, KYC); a contract gates a claim on the proof.
-- **Verifiable agent actions** — an LLM-authored job with deterministic control flow;
+- **Verifiable agent actions** — an LLM-authored task with deterministic control flow;
   prove what the agent actually did, with every `llm_query` committed in the transcript.
 - **Auditable process** — prove a refund, royalty split, or fee was computed per the
   documented rules; a proof-of-process for disputes and compliance, no chain required.
@@ -198,7 +195,7 @@ encoding-bridge caveat between `outputHash` (SHA-256) and the consumer's
 
 ## Orchestrator
 
-The orchestrator is one way to drive the worker: it connects an LLM (Claude) to the
+The orchestrator is one way to author and run a task: it connects an LLM (Claude) to the
 Proveno VM so a natural-language task becomes a proven computation. The LLM authors
 the program; Proveno makes the result verifiable.
 

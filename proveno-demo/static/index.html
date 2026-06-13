@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>proveno — verifiable AI</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section id="panel-input" class="panel">
+        <h1 class="panel-title">Ask a verifiable question</h1>
+        <textarea
+          id="task-input"
+          rows="4"
+          placeholder="Did ETH close above $3,000 on May 21 2026?"
+        ></textarea>
+        <button id="run-btn" type="button">Run &amp; Prove</button>
+
+        <h2 class="section-heading">Try an example:</h2>
+        <div class="preset-list">
+          <button class="preset-btn" type="button">
+            Did ETH close above $3,000 on May 21 2026?
+          </button>
+          <button class="preset-btn" type="button">
+            What was the BTC/USD price at midnight UTC on May 1 2026?
+          </button>
+          <button class="preset-btn" type="button">
+            Did the US CPI for April 2026 exceed 3%?
+          </button>
+        </div>
+
+        <p class="tagline">
+          Powered by proveno — a verifiable Lua VM with ZK proofs
+        </p>
+      </section>
+
+      <section id="panel-pipeline" class="panel">
+        <h2 class="section-heading">Pipeline</h2>
+        <div id="pipeline-steps">
+          <div class="step-row" id="step-generating">
+            <span class="step-icon" aria-hidden="true"></span>
+            <span class="step-label">Generating Lua program</span>
+            <span class="step-status"></span>
+          </div>
+          <div class="step-row" id="step-compiling">
+            <span class="step-icon" aria-hidden="true"></span>
+            <span class="step-label">Compiling to bytecode</span>
+            <span class="step-status"></span>
+          </div>
+          <div class="step-row" id="step-executing">
+            <span class="step-icon" aria-hidden="true"></span>
+            <span class="step-label">Executing with live data</span>
+            <span class="step-status"></span>
+          </div>
+          <div class="step-row" id="step-proving">
+            <span class="step-icon" aria-hidden="true"></span>
+            <span class="step-label">Generating ZK proof</span>
+            <span class="step-status"></span>
+          </div>
+          <div class="step-row" id="step-on-chain">
+            <span class="step-icon" aria-hidden="true"></span>
+            <span class="step-label">Verifying on chain</span>
+            <span class="step-status"></span>
+          </div>
+          <div class="step-row" id="step-complete">
+            <span class="step-icon" aria-hidden="true"></span>
+            <span class="step-label">Proof complete</span>
+            <span class="step-status"></span>
+          </div>
+        </div>
+
+        <pre id="lua-source" class="hidden"></pre>
+        <div id="tool-calls" class="hidden"></div>
+      </section>
+
+      <section id="panel-hashes" class="panel">
+        <h2 class="section-heading">Proof commitments</h2>
+
+        <div class="hash-row" id="hash-program">
+          <span class="hash-label" title="SHA-256 of the compiled Lua program"
+            >Program hash</span
+          >
+          <code data-tooltip="SHA-256 of the compiled Lua program">——</code>
+        </div>
+        <div class="hash-row" id="hash-input">
+          <span
+            class="hash-label"
+            title="SHA-256 of the natural language question"
+            >Input hash</span
+          >
+          <code data-tooltip="SHA-256 of the natural language question"
+            >——</code
+          >
+        </div>
+        <div class="hash-row" id="hash-tool-responses">
+          <span class="hash-label" title="SHA-256 of all API responses"
+            >Tool responses hash</span
+          >
+          <code data-tooltip="SHA-256 of all API responses">——</code>
+        </div>
+        <div class="hash-row" id="hash-output">
+          <span class="hash-label" title="SHA-256 of the final answer"
+            >Output hash</span
+          >
+          <code data-tooltip="SHA-256 of the final answer">——</code>
+        </div>
+        <div class="hash-row" id="hash-tls">
+          <span
+            class="hash-label"
+            title="Notary-signed proof data came from the source"
+            >Attestation hash</span
+          >
+          <code data-tooltip="Notary-signed proof data came from the source"
+            >——</code
+          >
+        </div>
+        <div class="hash-row" id="hash-policy">
+          <span
+            class="hash-label"
+            title="SHA-256 of execution constraints (gas, quotas)"
+            >Policy hash</span
+          >
+          <code data-tooltip="SHA-256 of execution constraints (gas, quotas)"
+            >——</code
+          >
+        </div>
+
+        <div id="result-banner" class="hidden"></div>
+
+        <!-- Phase 3: attack simulator -->
+        <div id="attack-simulator" class="hidden"></div>
+
+        <!-- Phase 4: on-chain verification -->
+        <section id="panel-onchain" class="hidden">
+          <h3>On chain</h3>
+          <div class="onchain-row">
+            <span class="label">Chain</span><code id="onchain-chain">——</code>
+          </div>
+          <div class="onchain-row">
+            <span class="label">Verifier</span
+            ><span id="onchain-verifier"><code>——</code></span>
+          </div>
+          <div class="onchain-row">
+            <span class="label">Status</span
+            ><span id="onchain-status">——</span>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

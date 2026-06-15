@@ -97,8 +97,15 @@ require_cmd cast
 require_cmd forge
 require_cmd cargo
 
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-    echo "error: ANTHROPIC_API_KEY must be set" >&2
+# ANTHROPIC_API_KEY is only needed for the orchestrator (LLM) generation path.
+# When LUA_SOURCE is set, step 1 compiles a fixed Lua file instead — no LLM.
+if [[ -z "${LUA_SOURCE:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    echo "error: ANTHROPIC_API_KEY must be set (or set LUA_SOURCE to skip the LLM)" >&2
+    exit 1
+fi
+
+if [[ -n "${LUA_SOURCE:-}" && ! -f "$LUA_SOURCE" ]]; then
+    echo "error: LUA_SOURCE='$LUA_SOURCE' not found" >&2
     exit 1
 fi
 
@@ -119,20 +126,39 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 # ─── 1. generate proof artifacts ─────────────────────────────────────────────
-echo "── [1/5] Generating Noir proof via orchestrator ──"
+# Two backends, both producing the same JSON shape ({proving:{proof_bytes_hex,
+# public_inputs[8]}, return_value}) at $ORCH_JSON:
+#   - LUA_SOURCE set : compile a fixed Lua file (no LLM) and prove it.
+#   - otherwise      : the orchestrator generates a program from $TASK via LLM.
 mkdir -p "$PROVE_OUTPUT"
 ORCH_JSON="$PROVE_OUTPUT/orchestrator.json"
 
-cargo run --quiet -p proveno-orchestrator -- \
-    "$TASK" \
-    --prove \
-    --json \
-    --prove-output "$PROVE_OUTPUT" \
-    --circuit-dir "$CIRCUIT_DIR" \
-    > "$ORCH_JSON"
+if [[ -n "${LUA_SOURCE:-}" ]]; then
+    echo "── [1/5] Generating Noir proof from fixed Lua source ──"
+    echo "  source       : $LUA_SOURCE"
+    # compile → dry-run → prove; progress to stderr so stdout stays pure JSON.
+    cargo run --quiet -p proveno-compiler -- \
+        "$LUA_SOURCE" "$PROVE_OUTPUT/compiled.json" >&2
+    cargo run --quiet -p proveno_prover --bin proveno-prover -- \
+        "$PROVE_OUTPUT/compiled.json" "$PROVE_OUTPUT/dry_result.json" >&2
+    cargo run --quiet -p proveno-noir -- \
+        "$PROVE_OUTPUT/compiled.json" "$PROVE_OUTPUT/dry_result.json" \
+        --circuit-dir "$CIRCUIT_DIR" \
+        --json \
+        > "$ORCH_JSON"
+else
+    echo "── [1/5] Generating Noir proof via orchestrator ──"
+    cargo run --quiet -p proveno-orchestrator -- \
+        "$TASK" \
+        --prove \
+        --json \
+        --prove-output "$PROVE_OUTPUT" \
+        --circuit-dir "$CIRCUIT_DIR" \
+        > "$ORCH_JSON"
+fi
 
 if ! jq -e '.proving.proof_bytes_hex' "$ORCH_JSON" > /dev/null; then
-    echo "error: orchestrator output missing proving.proof_bytes_hex; check $ORCH_JSON" >&2
+    echo "error: proof generation output missing proving.proof_bytes_hex; check $ORCH_JSON" >&2
     exit 1
 fi
 
@@ -158,7 +184,11 @@ print(v)
 PY
 )
 
-echo "  task         : $TASK"
+if [[ -n "${LUA_SOURCE:-}" ]]; then
+    echo "  lua source   : $LUA_SOURCE"
+else
+    echo "  task         : $TASK"
+fi
 echo "  lua return   : $LUA_RETURN"
 echo "  num_steps    : $NUM_STEPS"
 echo "  policy hash  : $PI_HEX_7"

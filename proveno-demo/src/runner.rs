@@ -63,8 +63,7 @@ fn run_pipeline_inner(
         message: "ANTHROPIC_API_KEY environment variable not set".into(),
         at_stage: "generating_lua",
     })?;
-    let model =
-        std::env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-20250514".into());
+    let model = std::env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".into());
 
     let client = LlmClient::new(llm::Backend::Anthropic { api_key }, model);
     let tool_descs = tools::live_tool_descriptions();

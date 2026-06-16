@@ -15,6 +15,7 @@ impl ProverHost {
         ProverHost {
             client: reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
+                .user_agent("proveno/1.0")
                 .build()
                 .expect("failed to build HTTP client"),
         }

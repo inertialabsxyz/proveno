@@ -4,38 +4,33 @@ pragma solidity ^0.8.24;
 import {ProvenoVerifier} from "./ProvenoVerifier.sol";
 import {PublicInputs} from "./Types.sol";
 
-/// @notice Example consumer that decodes and stores a price-feed payload after
-/// the proveno proof and the payload commitment both verify on-chain.
+/// @notice Example consumer that decodes and stores a proven result after the
+/// proveno proof and the output-payload commitment both verify on-chain.
 contract ProvenoConsumer {
     error OutputPayloadMismatch();
 
-    event PriceUpdated(uint256 price, uint8 sourcesUsed, uint64 blockTimestamp);
+    event ResultConsumed(int256 result);
 
     ProvenoVerifier public immutable provenoVerifier;
 
-    uint256 public lastPrice;
-    uint8   public lastSourcesUsed;
-    uint64  public lastBlockTimestamp;
+    int256 public lastResult;
 
     constructor(address _provenoVerifier) {
         provenoVerifier = ProvenoVerifier(_provenoVerifier);
     }
 
-    /// @notice Verify a proveno proof, then decode and store the asserted price-feed
-    /// payload.
+    /// @notice Verify a proveno proof, then decode and store the asserted result.
     ///
-    /// @dev `outputPayload` must abi-decode as `(uint256 price, uint8 sourcesUsed,
-    /// uint64 blockTimestamp)` and its `keccak256` must equal `inputs.outputHash`.
-    /// Achieving that match is the responsibility of the Lua program author:
-    /// the program must arrange for its `outputHash` commitment to equal
-    /// `keccak256(outputPayload)` — i.e. the program emits a result whose
-    /// canonical encoding is the payload, and pins `outputHash` accordingly.
-    /// This contract treats the payload bytes opaquely and only enforces the
-    /// keccak256 binding.
+    /// @dev `outputPayload` is the canonical output payload
+    /// `abi.encode(int256(return_value))`, and its `keccak256` must equal
+    /// `inputs.outputHash`. The match holds by construction: the circuit binds
+    /// `outputHash` in-circuit to `keccak256(abi.encode(int256(return_value)))`
+    /// (`noir/src/main.nr`), so this contract checks the same preimage and
+    /// algorithm and decodes the single proven `int256`.
     ///
-    /// Order of checks is important: the proof is verified BEFORE
-    /// the payload check, so a bogus proof always reverts with `ProofInvalid`
-    /// regardless of the payload.
+    /// Order of checks is important: the proof is verified BEFORE the payload
+    /// check, so a bogus proof always reverts with `ProofInvalid` regardless of
+    /// the payload.
     function consumeResult(
         bytes calldata proof,
         PublicInputs calldata inputs,
@@ -45,13 +40,10 @@ contract ProvenoConsumer {
 
         if (keccak256(outputPayload) != inputs.outputHash) revert OutputPayloadMismatch();
 
-        (uint256 price, uint8 sourcesUsed, uint64 blockTimestamp) =
-            abi.decode(outputPayload, (uint256, uint8, uint64));
+        int256 result = abi.decode(outputPayload, (int256));
 
-        lastPrice = price;
-        lastSourcesUsed = sourcesUsed;
-        lastBlockTimestamp = blockTimestamp;
+        lastResult = result;
 
-        emit PriceUpdated(price, sourcesUsed, blockTimestamp);
+        emit ResultConsumed(result);
     }
 }

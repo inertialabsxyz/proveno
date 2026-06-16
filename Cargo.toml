@@ -14,6 +14,9 @@ zkvm = []
 
 [dependencies]
 sha2 = { version = "0.10", default-features = false, features = ["oid"] }
+# Keccak-256 (Ethereum/Solidity flavour, not NIST SHA3) for the output_hash
+# commitment the on-chain consumer checks via keccak256(outputPayload).
+sha3 = { version = "0.10", default-features = false }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }

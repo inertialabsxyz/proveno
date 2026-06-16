@@ -20,7 +20,7 @@
 #     PROVENO_CONSUMER_ADDR / PRIVATE_KEY exactly as for demo-noir-e2e.sh.
 #
 # All other env overrides honoured by demo-noir-e2e.sh (PROVE_OUTPUT,
-# CIRCUIT_DIR, DEMO_PRICE, DEMO_SOURCES, DEMO_TS) are respected.
+# CIRCUIT_DIR) are respected.
 
 set -euo pipefail
 

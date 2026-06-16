@@ -1,3 +1,4 @@
+use keccak256::keccak256;
 use poseidon::poseidon2::Poseidon2;
 
 global MAX_BYTECODE: u32 = 512;
@@ -18,6 +19,28 @@ fn be_bytes32_to_field(bytes: [u8; 32]) -> Field {
         acc = acc * 256 + bytes[i] as Field;
     }
     acc
+}
+
+// Canonical output payload commitment: keccak256(abi.encode(int256(return_value))).
+// The payload is a single 32-byte big-endian, two's-complement (sign-extended)
+// word -- exactly what a Solidity consumer reads back via
+// `abi.decode(payload, (int256))` and hashes via keccak256. Computed in-circuit
+// and bound to the `output_hash` public input so the proof attests that
+// `output_hash` commits the proven `return_value`, not a free prover input.
+// Mirrors `commitment::abi_encode_int256` + `hash_output` on the Rust side.
+fn output_payload_keccak(return_value: i64) -> [u8; 32] {
+    // Sign-extend to 32 bytes: high 24 bytes are 0xff for negatives, else 0x00.
+    let fill: u8 = if return_value < 0 { 0xff } else { 0 };
+    let mut payload: [u8; 32] = [fill; 32];
+    // Low 8 bytes: big-endian of the i64 reinterpreted as u64 (matches Rust's
+    // `n.to_be_bytes()` and the bytecode-operand `(val as u64)` widening).
+    // Extract bytes least-significant-first via division to stay shift-free.
+    let mut v = return_value as u64;
+    for i in 0..8 {
+        payload[31 - i] = (v % 256) as u8;
+        v = v / 256;
+    }
+    keccak256(payload, 32)
 }
 
 fn assert_bytecode(
@@ -185,4 +208,10 @@ fn main(
     }
     let computed_attestation = Poseidon2::hash(bound_leaves, num_tool_calls);
     assert(computed_attestation == be_bytes32_to_field(attestation_hash));
+
+    // 9. Output payload: bind `output_hash` to the proven `return_value`. The
+    //    circuit recomputes keccak256(abi.encode(int256(return_value))) -- the
+    //    exact bytes the on-chain consumer decodes and hashes -- so `output_hash`
+    //    can no longer be set freely by the prover.
+    assert(output_payload_keccak(return_value) == output_hash);
 }

@@ -119,6 +119,7 @@ impl LiveHost {
     pub fn new(llm: LlmClient) -> Self {
         let http = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+            .user_agent("proveno/1.0")
             .build()
             .expect("failed to build HTTP client");
         LiveHost {

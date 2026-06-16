@@ -53,10 +53,12 @@ pub fn app_with_max_runs(max_runs: usize, chain_config: Arc<ChainConfig>) -> Rou
         .allow_methods([Method::GET, Method::POST])
         .allow_headers([header::CONTENT_TYPE]);
 
+    let static_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static");
+
     Router::new()
         .route("/health", get(health))
         .route("/run", post(run))
-        .fallback_service(ServeDir::new("static"))
+        .fallback_service(ServeDir::new(static_dir))
         .with_state(state)
         .layer(cors)
 }

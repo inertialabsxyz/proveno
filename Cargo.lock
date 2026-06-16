@@ -3495,6 +3495,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sha3",
  "webpki-roots 0.26.11",
  "x509-cert",
 ]

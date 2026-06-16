@@ -419,7 +419,7 @@ mod tests {
         .unwrap();
         // input_hash = SHA-256("7") which is non-zero
         assert_ne!(witness.input_hash, [0u8; 32]);
-        // output_hash is SHA-256 over return value bytes + (empty logs/transcript)
+        // output_hash = keccak256(abi.encode(int256(return_value))), non-zero
         assert_ne!(witness.output_hash, [0u8; 32]);
     }
 

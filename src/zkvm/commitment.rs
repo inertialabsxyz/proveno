@@ -11,6 +11,7 @@
 //!   - execution policy (`policy_hash`, Phase 2 stub)
 
 use sha2::{Digest, Sha256};
+use sha3::Keccak256;
 
 use crate::{
     host::{canonicalize::canonical_serialize, tape::OracleTape},
@@ -32,7 +33,14 @@ pub struct PublicInputs {
     /// SHA-256 commitment over all oracle tape entries (from `OracleTape::commitment_hash()`).
     pub tool_responses_hash: [u8; 32],
 
-    /// SHA-256 over `return_value || length-prefixed logs || transcript entries`.
+    /// keccak256 of the canonical output payload `abi.encode(int256(return_value))`.
+    ///
+    /// This is the exact preimage and algorithm an on-chain consumer checks via
+    /// `keccak256(outputPayload) == inputs.outputHash`, and it is bound
+    /// *in-circuit* to the proven `return_value` (see `noir/src/main.nr`). It
+    /// deliberately commits only the result the contract decodes — `logs` and
+    /// `transcript` provenance is carried by `tool_responses_hash` /
+    /// `attestation_hash`, not here.
     pub output_hash: [u8; 32],
 
     /// Bind-only provenance commitment: per-call Poseidon2 over each response
@@ -58,41 +66,38 @@ pub fn hash_input(v: &LuaValue) -> [u8; 32] {
     Sha256::digest(&bytes).into()
 }
 
+/// The proven `i64` return value for a `VmOutput`.
+///
+/// Mirrors the `proveno-noir` witness path exactly: an integer return value is
+/// its own `i64`; anything else proves as `0` (the circuit binds `0` too).
+fn return_value_i64(v: &LuaValue) -> i64 {
+    match v {
+        LuaValue::Integer(n) => *n,
+        _ => 0,
+    }
+}
+
+/// The canonical output payload for a proven `i64`: `abi.encode(int256(n))`.
+///
+/// A single 32-byte big-endian, two's-complement (sign-extended) word — exactly
+/// what Solidity `abi.decode(payload, (int256))` reads back. This is the
+/// preimage the circuit hashes in-circuit and the contract hashes on-chain.
+pub fn abi_encode_int256(n: i64) -> [u8; 32] {
+    let mut out = if n < 0 { [0xffu8; 32] } else { [0u8; 32] };
+    out[24..32].copy_from_slice(&n.to_be_bytes());
+    out
+}
+
 /// Compute the `output_hash` for a `VmOutput`.
 ///
-/// Hash layout:
-/// 1. `canonical_serialize(return_value)` bytes
-/// 2. For each log: `u32_le(len) || utf8_bytes`
-/// 3. For each transcript record: `tag(1) || u32_le(len) || payload`
-///    - Success: tag=0x00, payload=`response_canonical`
-///    - Error:   tag=0x01, payload=`error_message` as UTF-8 bytes
+/// `keccak256(abi.encode(int256(return_value)))` — the canonical output payload
+/// a consumer contract decodes, bound in-circuit to the proven `return_value`.
+/// Only the result is committed here; `logs`/`transcript` are deliberately not
+/// mixed in (their provenance lives in `tool_responses_hash` /
+/// `attestation_hash`).
 pub fn hash_output(output: &VmOutput) -> [u8; 32] {
-    let mut h = Sha256::new();
-
-    // 1. Return value
-    h.update(canonical_serialize(&output.return_value).unwrap_or_else(|_| b"null".to_vec()));
-
-    // 2. Logs: length-prefixed
-    for log in &output.logs {
-        h.update((log.len() as u32).to_le_bytes());
-        h.update(log.as_bytes());
-    }
-
-    // 3. Transcript: framed identically to OracleTape entries (tag || len_le4 || payload)
-    for record in &output.transcript {
-        if record.error_message.is_empty() {
-            h.update([0x00u8]);
-            h.update((record.response_canonical.len() as u32).to_le_bytes());
-            h.update(&record.response_canonical);
-        } else {
-            let msg = record.error_message.as_bytes();
-            h.update([0x01u8]);
-            h.update((msg.len() as u32).to_le_bytes());
-            h.update(msg);
-        }
-    }
-
-    h.finalize().into()
+    let payload = abi_encode_int256(return_value_i64(&output.return_value));
+    Keccak256::digest(payload).into()
 }
 
 /// Build `PublicInputs` from all the components of an execution.
@@ -144,10 +149,6 @@ pub fn compute_public_inputs_with_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        host::{tape::TapeEntry, transcript::ToolCallRecord},
-        types::value::LuaString,
-    };
 
     fn make_output(ret: LuaValue) -> VmOutput {
         VmOutput {
@@ -191,11 +192,47 @@ mod tests {
     }
 
     #[test]
-    fn hash_output_includes_logs() {
-        let mut out1 = make_output(LuaValue::Nil);
+    fn hash_output_ignores_logs_and_transcript() {
+        // output_hash commits only the result the contract decodes; logs and
+        // transcript provenance lives in tool_responses_hash / attestation_hash.
+        let mut out1 = make_output(LuaValue::Integer(7));
         out1.logs.push("hello".to_string());
-        let out2 = make_output(LuaValue::Nil);
-        assert_ne!(hash_output(&out1), hash_output(&out2));
+        let out2 = make_output(LuaValue::Integer(7));
+        assert_eq!(hash_output(&out1), hash_output(&out2));
+    }
+
+    #[test]
+    fn abi_encode_int256_known_vectors() {
+        assert_eq!(abi_encode_int256(0), [0u8; 32]);
+
+        let mut forty_two = [0u8; 32];
+        forty_two[31] = 0x2a;
+        assert_eq!(abi_encode_int256(42), forty_two);
+
+        // -1 is all-ones in two's complement, sign-extended to 32 bytes.
+        assert_eq!(abi_encode_int256(-1), [0xffu8; 32]);
+
+        // 256 = 0x0100 occupies the two low-order bytes.
+        let mut two_fifty_six = [0u8; 32];
+        two_fifty_six[30] = 0x01;
+        assert_eq!(abi_encode_int256(256), two_fifty_six);
+    }
+
+    #[test]
+    fn hash_output_is_keccak_of_canonical_payload() {
+        use sha3::{Digest, Keccak256};
+        let out = make_output(LuaValue::Integer(42));
+        let expected: [u8; 32] = Keccak256::digest(abi_encode_int256(42)).into();
+        assert_eq!(hash_output(&out), expected);
+    }
+
+    #[test]
+    fn hash_output_non_integer_proves_as_zero() {
+        // Non-integer return values prove as i64 0, matching the witness path.
+        assert_eq!(
+            hash_output(&make_output(LuaValue::Nil)),
+            hash_output(&make_output(LuaValue::Boolean(true)))
+        );
     }
 
     #[test]

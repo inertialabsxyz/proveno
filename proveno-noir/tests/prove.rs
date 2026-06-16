@@ -163,6 +163,43 @@ mod nargo_tests {
         }
     }
 
+    /// `output_hash` is bound in-circuit to keccak256(abi.encode(int256(return_value))).
+    /// Feeding any other `output_hash` must make witness generation / proving fail,
+    /// proving the previously-unconstrained field is now constrained.
+    #[test]
+    fn tampered_output_hash_fails() {
+        let _lock = prover_lock();
+        let (bytecode, output) = run_lua("return 1 + 2");
+        let ret = return_i64(&output.return_value);
+        let tape = OracleTape::from_records(&output.transcript);
+        let mut witness = build_witness(
+            &bytecode,
+            &output.trace,
+            ret,
+            &tape,
+            &LuaValue::Nil,
+            &output,
+            [0u8; 32],
+        )
+        .unwrap();
+        // Tamper the output_hash away from the canonical keccak payload.
+        witness.output_hash[0] ^= 0xFF;
+        let prover = NoirProver {
+            circuit_dir: circuit_dir(),
+        };
+        let result = timed_prove("tampered_output_hash_fails", &prover, &witness);
+        match result {
+            Ok(proof) => {
+                let verified =
+                    timed_verify("tampered_output_hash_fails", &prover, &proof).unwrap_or(false);
+                assert!(!verified, "tampered output_hash should not verify");
+            }
+            Err(_) => {
+                // nargo execute rejects the bad witness (assert fails) — also acceptable.
+            }
+        }
+    }
+
     #[test]
     fn multi_function_proves_correctly() {
         let _lock = prover_lock();

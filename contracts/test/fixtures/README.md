@@ -11,7 +11,7 @@ plus a representative `outputPayload` for the consumer-decode tests.
 | `public_inputs.bin` | Wire-format public inputs (194 × 32-byte words) as `bb prove` writes them |
 | `public_inputs.json` | The same 8 logical fields in the order declared by `noir/src/main.nr` (field 7 is `attestationHash` — the bind-only per-call provenance commitment) |
 | `policy_hash` | The 32-byte policy hash (hex-prefixed string, 66 chars) committed by the proof |
-| `output_payload.bin` | A demo `abi.encode(uint256, uint8, uint64)` price payload used by `ProvenoConsumer` tests |
+| `output_payload.bin` | The canonical output payload `abi.encode(int256(return_value))` (here `int256(42)`); `keccak256` of it equals `outputHash` |
 
 ## Regenerating
 
@@ -56,12 +56,11 @@ cp noir/target/public_inputs  contracts/test/fixtures/public_inputs.bin
 
 ## About `output_payload.bin`
 
-`output_payload.bin` is `abi.encode(2000e18, uint8(3), uint64(1716000000))`. It
-is **not** required to satisfy `keccak256(outputPayload) == outputHash` for
-this proof — the current proveno pipeline commits `outputHash` as
-`SHA-256(canonical_serialize(return_value) || logs || transcript)`, so a real
-proof cannot produce a payload whose keccak256 matches `outputHash` without an
-encoding bridge in the Lua program itself. The consumer tests deploy a passing
-mock verifier alongside the real one so the keccak256 → `outputHash` assertion
-can be exercised on crafted inputs while the real proof still drives the
-`ProofInvalid` path.
+`output_payload.bin` is `abi.encode(int256(return_value))` — for this fixture
+`abi.encode(int256(42))`, the 32-byte word `0x..2a`. It satisfies
+`keccak256(outputPayload) == outputHash` **by construction**: the circuit binds
+`outputHash` in-circuit to `keccak256(abi.encode(int256(return_value)))`
+(`noir/src/main.nr`), the exact preimage and algorithm `ProvenoConsumer`
+checks. The consumer's canonical-success test feeds this payload to the real
+verifier and proof; the tamper test flips a byte to drive the
+`OutputPayloadMismatch` path.

@@ -9,24 +9,12 @@
 #      reuse already-deployed addresses passed through environment variables.
 #   3. Call `ProvenoVerifier.verify(proof, inputs)` (view) on chain and require it
 #      to return `true` — this is the headline assertion of the demo.
-#   4. Build an `outputPayload = abi.encode(uint256 price, uint8 sourcesUsed,
-#      uint64 blockTimestamp)` from the demo defaults (or user-provided env)
-#      and call `ProvenoConsumer.consumeResult(proof, inputs, outputPayload)`.
-#   5. Read back `lastPrice`, `lastSourcesUsed`, `lastBlockTimestamp` and print
-#      a one-line summary.
-#
-# Encoding-bridge note (read this before running for real):
-#   `ProvenoConsumer.consumeResult` enforces
-#       keccak256(outputPayload) == inputs.outputHash
-#   The proveno circuit currently commits `outputHash` as
-#       SHA-256(canonical_serialize(return_value) || logs || transcript)
-#   Producing a Lua program whose `outputHash` matches `keccak256(outputPayload)`
-#   requires an encoding bridge that is the Lua program author's responsibility
-#   and is not yet supplied by the pipeline. Until that bridge exists, the
-#   `consumeResult` step is expected to revert with `OutputPayloadMismatch`.
-#   The script catches that revert, reports it explicitly, and still exits 0
-#   if the on-chain `ProvenoVerifier.verify` succeeded — verifying the proof on
-#   chain is what this demo is here to prove.
+#   4. Build the canonical `outputPayload = abi.encode(int256(return_value))`
+#      from the proof's own return value and call
+#      `ProvenoConsumer.consumeResult(proof, inputs, outputPayload)`. The circuit
+#      binds `outputHash` in-circuit to `keccak256(outputPayload)`, so this
+#      check passes by construction.
+#   5. Read back `lastResult` and print a one-line summary.
 #
 # Environment:
 #   ANTHROPIC_API_KEY    required (used by the orchestrator for LLM generation)
@@ -37,9 +25,6 @@
 #   PROVENO_CONSUMER_ADDR   required if DEPLOY != 1
 #   PROVE_OUTPUT         default: /tmp/proveno-demo  (where compiled.json/dry_result.json land)
 #   CIRCUIT_DIR          default: noir            (path to the Noir circuit)
-#   DEMO_PRICE           default: 100000000000000000000 (= 100e18 in wei-scaled price)
-#   DEMO_SOURCES         default: 1
-#   DEMO_TS              default: 1700000000
 #
 # Usage:
 #   ./demo-noir-e2e.sh "<natural-language task>"
@@ -57,10 +42,6 @@ RPC_URL="${RPC_URL:-http://127.0.0.1:8545}"
 PROVE_OUTPUT="${PROVE_OUTPUT:-/tmp/proveno-demo}"
 CIRCUIT_DIR="${CIRCUIT_DIR:-noir}"
 DEPLOY="${DEPLOY:-0}"
-
-DEMO_PRICE="${DEMO_PRICE:-100000000000000000000}"
-DEMO_SOURCES="${DEMO_SOURCES:-1}"
-DEMO_TS="${DEMO_TS:-1700000000}"
 
 # ─── .env autoload ───────────────────────────────────────────────────────────
 # The orchestrator binary reads .env via dotenvy, but this shell script's own
@@ -253,7 +234,9 @@ echo "  ✓ proof verified on chain (ProvenoVerifier.verify -> true)"
 # ─── 4. consumer flow ────────────────────────────────────────────────────────
 echo "── [4/5] ProvenoConsumer.consumeResult(proof, inputs, outputPayload) ──"
 
-OUTPUT_PAYLOAD=$(cast abi-encode 'f(uint256,uint8,uint64)' "$DEMO_PRICE" "$DEMO_SOURCES" "$DEMO_TS")
+# Canonical output payload: abi.encode(int256(return_value)). The circuit bound
+# outputHash = keccak256(this) in-circuit, so the consumer's check passes.
+OUTPUT_PAYLOAD=$(cast abi-encode 'f(int256)' "$RETURN_VALUE")
 EXPECTED_KECCAK=$(cast keccak "$OUTPUT_PAYLOAD")
 
 echo "  outputPayload : $OUTPUT_PAYLOAD"
@@ -278,10 +261,6 @@ CONSUMER_SUCCEEDED=0
 if [[ $CONSUMER_STATUS -eq 0 ]]; then
     echo "  ✓ consumeResult succeeded"
     CONSUMER_SUCCEEDED=1
-elif echo "$CONSUMER_OUT" | grep -qi 'OutputPayloadMismatch'; then
-    echo "  ⚠ consumeResult reverted with OutputPayloadMismatch — expected when the"
-    echo "    Lua program does not provide the keccak256-encoded outputHash bridge."
-    echo "    The proof itself verified on chain above; this is a known consumer-side gap."
 else
     echo "  ⚠ consumeResult failed:" >&2
     echo "$CONSUMER_OUT" | tail -n 20 >&2
@@ -290,18 +269,15 @@ fi
 # ─── 5. read back consumer state ─────────────────────────────────────────────
 echo "── [5/5] Reading ProvenoConsumer state ──"
 
-LAST_PRICE=$(cast call --rpc-url "$RPC_URL" "$PROVENO_CONSUMER_ADDR" 'lastPrice()(uint256)' || echo "")
-LAST_SRCS=$(cast call  --rpc-url "$RPC_URL" "$PROVENO_CONSUMER_ADDR" 'lastSourcesUsed()(uint8)'  || echo "")
-LAST_TS=$(cast call    --rpc-url "$RPC_URL" "$PROVENO_CONSUMER_ADDR" 'lastBlockTimestamp()(uint64)' || echo "")
+LAST_RESULT=$(cast call --rpc-url "$RPC_URL" "$PROVENO_CONSUMER_ADDR" 'lastResult()(int256)' || echo "")
 
-echo "  lastPrice          : $LAST_PRICE"
-echo "  lastSourcesUsed    : $LAST_SRCS"
-echo "  lastBlockTimestamp : $LAST_TS"
+echo "  lastResult : $LAST_RESULT"
 
 # ─── summary ─────────────────────────────────────────────────────────────────
 echo
 if [[ $CONSUMER_SUCCEEDED -eq 1 ]]; then
-    echo "✓ demo OK — proof verified on chain; consumer updated to ($LAST_PRICE, $LAST_SRCS, $LAST_TS)"
+    echo "✓ demo OK — proof verified on chain; consumer stored lastResult = $LAST_RESULT"
 else
-    echo "✓ demo OK — proof verified on chain; consumer step pending encoding bridge"
+    echo "✗ demo FAILED — proof verified on chain but consumeResult reverted" >&2
+    exit 1
 fi

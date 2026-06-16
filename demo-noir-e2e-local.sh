@@ -10,7 +10,7 @@
 #   ANTHROPIC_API_KEY=… ./demo-noir-e2e-local.sh "<natural-language task>"
 #
 # All environment overrides accepted by demo-noir-e2e.sh (PROVE_OUTPUT,
-# CIRCUIT_DIR, DEMO_PRICE, DEMO_SOURCES, DEMO_TS) are respected.
+# CIRCUIT_DIR) are respected.
 
 set -euo pipefail
 

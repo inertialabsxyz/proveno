@@ -1,4 +1,5 @@
 pub mod prover;
+pub mod verifier;
 pub mod witness;
 
 use std::path::PathBuf;

@@ -186,6 +186,38 @@ all of Tier B. Tier A needs nothing. Tier C is a separate, larger change
 (constant-pool commitment) and can be a follow-on commit. Tier D is deferred and
 documented as such.
 
+## Adjacent unconstrained public inputs (out of scope for #30, recorded as a known gap)
+
+While analysing the circuit for stack semantics, a related soundness gap one
+level up became visible and is recorded here so it isn't lost — it is **not**
+part of issue #30's scope.
+
+Of the 8 public inputs, only four are actually bound in `noir/src/main.nr`:
+`program_hash` (`assert_bytecode`, line 40), `return_value` (final `Ret`, line
+128), `tool_responses_hash` (line 163), and `attestation_hash` (line 187). The
+remaining three — **`input_hash`, `output_hash`, `policy_hash`** — are declared
+`pub` (lines 60–63) but are **never referenced in the circuit body**. They are
+free public inputs: the circuit accepts whatever the prover supplies.
+
+The Rust side *does* compute real values (`hash_output(output)` over return
+value + logs + transcript, `src/zkvm/commitment.rs:61`,
+`proveno-noir/src/witness.rs:151`), so an honest prover fills them in
+correctly — but nothing in the circuit forces that. A proof verifies with a
+fabricated `output_hash`.
+
+This is the same class of gap as #30, one level up: #30 is "intermediate stack
+values aren't constrained"; this is "the output/input/policy commitments aren't
+bound to the execution." Note the partial overlap: the circuit binds the scalar
+`return_value`, but `output_hash` covers strictly more (return value **+ logs +
+transcript**), so even the cross-checkable portion is currently unbound, and the
+logs/transcript portion has no in-circuit anchor at all. Arguably a larger gap
+than the stack one, since `output_hash` is the public input a consumer contract
+keys on.
+
+**Implication for the trace verifier:** mirror the circuit *as-is* (these three
+unchecked) and mark them with an explicit `TODO`, so the Rust verifier documents
+the gap rather than silently modelling a binding the circuit doesn't enforce.
+
 ## Open questions (resolve before circuit code)
 
 1. **Constant-pool commitment shape (Tier C / PushK).** Two routes:

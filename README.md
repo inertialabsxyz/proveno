@@ -219,7 +219,7 @@ cargo run -p proveno-orchestrator -- "fetch the top hacker news story title"
 |------|-------------|
 | `--json` | Machine-readable JSON output with full transcript and verification hashes |
 | `--verbose` / `-v` | Show system prompt and raw LLM responses |
-| `--model <model>` | Claude model to use (default: `claude-sonnet-4-20250514`) |
+| `--model <model>` | Claude model to use (default: `claude-sonnet-4-6`) |
 | `--max-retries <n>` | Max retry attempts on errors (default: 3) |
 
 ### Available tools

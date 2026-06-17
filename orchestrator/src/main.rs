@@ -13,7 +13,7 @@ struct Cli {
     #[arg(long, default_value = "anthropic")]
     provider: String,
 
-    /// Model name. Defaults: anthropic→claude-sonnet-4-20250514, ollama→llama3.1
+    /// Model name. Defaults: anthropic→claude-sonnet-4-6, ollama→llama3.1
     #[arg(long)]
     model: Option<String>,
 
@@ -92,7 +92,7 @@ fn main() {
             let model = cli
                 .model
                 .clone()
-                .unwrap_or_else(|| "claude-sonnet-4-20250514".into());
+                .unwrap_or_else(|| "claude-sonnet-4-6".into());
             (llm::Backend::Anthropic { api_key }, model)
         }
         "ollama" => {

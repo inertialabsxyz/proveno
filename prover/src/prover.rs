@@ -7,10 +7,7 @@ use proveno::{
     tls::TlsAttestationRecord,
     types::value::LuaValue,
     vm::engine::{HostInterface, Vm, VmConfig},
-    zkvm::{
-        commitment::{compute_public_inputs, compute_public_inputs_with_policy},
-        guest_input::GuestInput,
-    },
+    zkvm::commitment::{compute_public_inputs, compute_public_inputs_with_policy},
 };
 
 pub use proveno::zkvm::dry_run_result::DryRunResult;
@@ -19,7 +16,7 @@ pub use proveno::zkvm::dry_run_result::DryRunResult;
 pub struct Prover<H: HostInterface> {
     config: VmConfig,
     host: H,
-    tool_names: Vec<String>,
+    _tool_names: Vec<String>,
 }
 
 impl<H: HostInterface> Prover<H> {
@@ -28,7 +25,7 @@ impl<H: HostInterface> Prover<H> {
         Prover {
             config,
             host,
-            tool_names,
+            _tool_names: tool_names,
         }
     }
 
@@ -92,21 +89,21 @@ impl<H: HostInterface> Prover<H> {
         })
     }
 
-    /// Build a `GuestInput` from a dry-run result (for passing to the zkVM).
-    pub fn build_guest_input(
-        &self,
-        program: CompiledProgram,
-        input: LuaValue,
-        dry_run: &DryRunResult,
-    ) -> GuestInput {
-        GuestInput::new(
-            program,
-            input,
-            dry_run.oracle_tape.clone(),
-            self.config.clone(),
-            self.tool_names.clone(),
-        )
-    }
+    // /// Build a `GuestInput` from a dry-run result (for passing to the zkVM).
+    // pub fn build_guest_input(
+    //     &self,
+    //     program: CompiledProgram,
+    //     input: LuaValue,
+    //     dry_run: &DryRunResult,
+    // ) -> GuestInput {
+    //     GuestInput::new(
+    //         program,
+    //         input,
+    //         dry_run.oracle_tape.clone(),
+    //         self.config.clone(),
+    //         self._tool_names.clone(),
+    //     )
+    // }
 }
 
 #[cfg(test)]

@@ -180,10 +180,10 @@ echo "  proof bytes  : $(( (${#PROOF_HEX} - 2) / 2 ))"
 if [[ "$DEPLOY" == "1" ]]; then
     echo "── [2/5] Deploying HonkVerifier + ProvenoVerifier + ProvenoConsumer ──"
     DEPLOY_LOG="$PROVE_OUTPUT/deploy.log"
-    # --disable-code-size-limit is required because the generated HonkVerifier
-    # is ~34 KB, well over EIP-170's 24576-byte ceiling. Deploying to mainnet
-    # would also require a chain that relaxes (or proxies around) that limit;
-    # on anvil the demo pairs this with `--code-size-limit` on the node.
+    # The bb 5.0.0 HonkVerifier is ~24.0 KB (23,977 B), under EIP-170's
+    # 24576-byte ceiling, so it deploys to a stock chain. --disable-code-size-limit
+    # is left on as headroom in case other demo contracts grow; it is no longer
+    # required by the verifier itself.
     POLICY_HASH="$PI_HEX_7" forge script contracts/script/Deploy.s.sol \
         --root contracts \
         --rpc-url "$RPC_URL" \

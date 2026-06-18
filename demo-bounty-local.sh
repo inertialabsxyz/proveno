@@ -45,8 +45,9 @@ cleanup() {
 trap cleanup EXIT
 
 echo "── starting anvil on 127.0.0.1:$PORT ──"
-# --code-size-limit raises EIP-170 above the default 24576 bytes; the generated
-# HonkVerifier is ~33KB and otherwise fails to deploy on a stock anvil.
+# The bb 5.0.0 HonkVerifier is ~24.0 KB (23,977 B), under EIP-170's 24,576-byte
+# limit, so it deploys to a stock chain. --code-size-limit is left raised as
+# headroom in case other demo contracts grow; it is not required by the verifier.
 anvil --port "$PORT" --code-size-limit 65536 --silent > "$ANVIL_LOG" 2>&1 &
 ANVIL_PID=$!
 

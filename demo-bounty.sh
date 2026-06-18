@@ -60,6 +60,22 @@ ok()   { echo "  ${GREEN}✓${RESET} $1"; }
 kv()   { printf "  ${DIM}%-13s${RESET} ${BOLD}%s${RESET}\n" "$1" "$2"; }
 die()  { echo "${RED}error:${RESET} $1" >&2; exit 1; }
 
+# Print a Lua file indented, with light syntax color. Prefers `bat` if present
+# (full highlighting); otherwise a minimal fallback that dims comments and
+# greens strings. With color off, prints plain.
+print_lua() {
+    local f="$1"
+    if [[ "$_C" != 1 ]]; then
+        sed 's/^/    /' "$f"
+    elif command -v bat >/dev/null 2>&1; then
+        bat --language=lua --style=plain --paging=never --color=always "$f" | sed 's/^/    /'
+    else
+        awk -v C="$DIM" -v S="$GREEN" -v R="$RESET" '
+            /^[[:space:]]*--/ { printf "    %s%s%s\n", C, $0, R; next }
+            { line=$0; gsub(/"[^"]*"/, S "&" R, line); printf "    %s\n", line }' "$f"
+    fi
+}
+
 # ─── .env autoload (BEFORE defaults, so .env values win over the defaults) ─────
 # Source .env next to this script so the shell's own checks see the same vars the
 # binaries read via dotenvy. A value already exported in the shell still wins.
@@ -133,6 +149,9 @@ ORCH_JSON="$PROVE_OUTPUT/orchestrator.json"
 if [[ -n "${LUA_SOURCE:-}" ]]; then
     step "[1/5] Generate the proof  (compile · run · prove)"
     kv "source" "$LUA_SOURCE"
+    echo "  ${DIM}task program:${RESET}"
+    print_lua "$LUA_SOURCE"
+    echo
     cargo run --quiet -p proveno-compiler -- \
         "$LUA_SOURCE" "$PROVE_OUTPUT/compiled.json" >&2
     cargo run --quiet -p proveno_prover --bin proveno-prover -- \

@@ -25,7 +25,7 @@
 #   RPC_URL              default: http://127.0.0.1:8545
 #   PRIVATE_KEY          required — the poster/deployer (anvil account 0)
 #   SOLVER_KEY           default: anvil account 1 — the agent that claims the bounty
-#   REWARD               default: 1000000000000000000 (1 ETH, in wei) escrowed by the poster
+#   REWARD               default: 10000000000000000 (0.01 ETH, in wei) escrowed by the poster
 #   DEPLOY               1 to deploy a fresh stack via forge script, otherwise reuse env addr
 #   BOUNTY_ADDR          required if DEPLOY != 1
 #   PROVE_OUTPUT         default: /tmp/proveno-demo  (where artifacts land)
@@ -50,7 +50,7 @@ RPC_URL="${RPC_URL:-http://127.0.0.1:8545}"
 PROVE_OUTPUT="${PROVE_OUTPUT:-/tmp/proveno-demo}"
 CIRCUIT_DIR="${CIRCUIT_DIR:-noir}"
 DEPLOY="${DEPLOY:-0}"
-REWARD="${REWARD:-1000000000000000000}"  # 1 ETH in wei
+REWARD="${REWARD:-10000000000000000}"  # 0.01 ETH in wei
 
 # Default solver = anvil account 1 (distinct from the account-0 poster), so the
 # payout is visible as a balance change on a different address.
@@ -112,8 +112,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 SOLVER_ADDR=$(cast wallet address --private-key "$SOLVER_KEY")
-REWARD_ETH=$(cast to-unit "$REWARD" ether)
-
+REWARD_ETH=$(cast to-unit "$REWARD" ether | sed 's/0*$//; s/\.$//')
 # ─── 1. generate proof artifacts ─────────────────────────────────────────────
 mkdir -p "$PROVE_OUTPUT"
 ORCH_JSON="$PROVE_OUTPUT/orchestrator.json"

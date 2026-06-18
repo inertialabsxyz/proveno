@@ -76,6 +76,25 @@ print_lua() {
     fi
 }
 
+# Map a chain id to a block-explorer base URL (empty if unknown, e.g. anvil).
+explorer_for() {
+    case "$1" in
+        8453)     echo "https://basescan.org" ;;
+        84532)    echo "https://sepolia.basescan.org" ;;
+        1)        echo "https://etherscan.io" ;;
+        11155111) echo "https://sepolia.etherscan.io" ;;
+        10)       echo "https://optimistic.etherscan.io" ;;
+        *)        echo "" ;;
+    esac
+}
+
+# Print a transaction hash and, when an explorer is known, a view URL.
+txkv() {
+    kv "tx" "$1"
+    [[ -n "${EXPLORER_BASE:-}" ]] && kv "view" "$EXPLORER_BASE/tx/$1"
+    return 0
+}
+
 # ─── .env autoload (BEFORE defaults, so .env values win over the defaults) ─────
 # Source .env next to this script so the shell's own checks see the same vars the
 # binaries read via dotenvy. A value already exported in the shell still wins.
@@ -133,6 +152,7 @@ SOLVER_ADDR=$(cast wallet address --private-key "$SOLVER_KEY")
 POSTER_ADDR=$(cast wallet address --private-key "$PRIVATE_KEY")
 REWARD_ETH=$(cast to-unit "$REWARD" ether | sed 's/0*$//; s/\.$//')
 CHAIN_ID=$(cast chain-id --rpc-url "$RPC_URL" 2>/dev/null || echo "?")
+EXPLORER_BASE="${EXPLORER_BASE:-$(explorer_for "$CHAIN_ID")}"
 
 # ─── banner ────────────────────────────────────────────────────────────────────
 echo "${BOLD}proveno · verifiable-task bounty demo${RESET}"
@@ -141,6 +161,7 @@ kv "task"     "$LUA_SOURCE"
 kv "reward"   "$REWARD_ETH ETH"
 kv "poster"   "$POSTER_ADDR"
 kv "solver"   "$SOLVER_ADDR"
+[[ -n "$EXPLORER_BASE" ]] && kv "explorer" "$EXPLORER_BASE" || true
 
 # ─── 1. generate proof artifacts ─────────────────────────────────────────────
 mkdir -p "$PROVE_OUTPUT"
@@ -239,18 +260,20 @@ step "[3/5] Poster posts a bounty  (escrow $REWARD_ETH ETH)"
 # id = nextId++ : the new bounty takes the current nextId value.
 BOUNTY_ID=$(cast call --rpc-url "$RPC_URL" "$BOUNTY_ADDR" 'nextId()(uint256)')
 
-cast send \
+POST_RECEIPT=$(cast send \
+    --json \
     --rpc-url "$RPC_URL" \
     --private-key "$PRIVATE_KEY" \
     --value "$REWARD" \
     "$BOUNTY_ADDR" \
     'postBounty(bytes32)(uint256)' \
-    "$PROGRAM_HASH" \
-    > /dev/null
+    "$PROGRAM_HASH")
+POST_TX=$(echo "$POST_RECEIPT" | jq -r '.transactionHash')
 
 kv "bounty id"    "$BOUNTY_ID"
 kv "program hash" "$PROGRAM_HASH"
 kv "reward"       "$REWARD_ETH ETH (escrowed)"
+txkv "$POST_TX"
 ok "bounty posted"
 
 # ─── 4. agent claims the bounty (solver) ─────────────────────────────────────
@@ -282,7 +305,9 @@ CLAIMED_TOPIC=$(cast keccak 'BountyClaimed(uint256,address,uint256)')
 echo "$CLAIM_RECEIPT" | jq -e --arg t "$CLAIMED_TOPIC" \
         '.logs[].topics[0] | select(. == $t)' > /dev/null \
     || die "BountyClaimed event not found in claim receipt"
+CLAIM_TX=$(echo "$CLAIM_RECEIPT" | jq -r '.transactionHash')
 ok "BountyClaimed emitted"
+txkv "$CLAIM_TX"
 
 # ─── 5. read back state + assert payout ──────────────────────────────────────
 step "[5/5] Verify claim state and payout"
@@ -294,6 +319,7 @@ read -r B_CLAIMED B_SOLVER < <(cast call --rpc-url "$RPC_URL" "$BOUNTY_ADDR" \
 
 [[ "$B_CLAIMED" != "true" ]] && die "bounty $BOUNTY_ID not marked claimed (got '$B_CLAIMED')"
 ok "bounty claimed = true, solver = $B_SOLVER"
+[[ -n "$EXPLORER_BASE" ]] && kv "bounty" "$EXPLORER_BASE/address/$BOUNTY_ADDR" || true
 
 # The solver must end up net positive: it received the reward and paid fees to
 # claim. Invariant: 0 < balance change <= reward (the shortfall is fees).

@@ -16,8 +16,8 @@ plus a representative `outputPayload` for the consumer-decode tests.
 ## Regenerating
 
 Run from the repo root. Requires the pinned toolchain on `PATH`: `nargo`
-`1.0.0-beta.18`, `bb` `3.0.0`, `poseidon` `v0.2.6` (`noir/Nargo.toml`). Other
-versions emit incompatible verifier/proof artifacts.
+`1.0.0-beta.22`, `bb` `5.0.0-nightly.20260522`, `poseidon` `v0.3.0`
+(`noir/Nargo.toml`). Other versions emit incompatible verifier/proof artifacts.
 
 ```bash
 # 1. Pick any Lua program (here: return 42)

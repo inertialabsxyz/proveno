@@ -149,15 +149,18 @@ checked-in `contracts/src/HonkVerifier.sol`, and the proof fixtures under
 
 | Tool | Version |
 |------|---------|
-| `nargo` | `1.0.0-beta.18` |
-| `bb` (Barretenberg) | `3.0.0` |
-| `poseidon` (Noir lib, `noir/Nargo.toml`) | `v0.2.6` |
+| `nargo` | `1.0.0-beta.22` |
+| `bb` (Barretenberg) | `5.0.0-nightly.20260522` |
+| `poseidon` (Noir lib, `noir/Nargo.toml`) | `v0.3.0` |
 
-Other `nargo`/`bb` versions are **not** supported — newer `nargo` changed the
-`poseidon2_permutation` signature (breaking `poseidon v0.2.6`), and `bb` emits a
-different verifier/proof format per version. If you upgrade, you must regenerate
-the verifier contract and fixtures together (see
-`contracts/test/fixtures/README.md`).
+Other `nargo`/`bb` versions are **not** supported — `nargo` and `bb` move in
+lockstep (the ACIR serialization and the verifier/proof format both change per
+version), and `poseidon v0.3.0` matches the `poseidon2_permutation` signature in
+`nargo beta.22`. This pairing is what keeps the generated
+`contracts/src/HonkVerifier.sol` **under the EIP-170 24,576-byte limit** (it is
+~24.0 KB; the earlier `bb 3.0.0` verifier was ~33 KB and not deployable on a
+stock EVM chain). If you upgrade, you must regenerate the verifier contract and
+fixtures together (see `contracts/test/fixtures/README.md`).
 
 ### Quick start: prove and verify a Lua program
 

@@ -181,15 +181,12 @@ if [[ "$DEPLOY" == "1" ]]; then
     echo "── [2/5] Deploying HonkVerifier + ProvenoVerifier + ProvenoConsumer ──"
     DEPLOY_LOG="$PROVE_OUTPUT/deploy.log"
     # The bb 5.0.0 HonkVerifier is ~24.0 KB (23,977 B), under EIP-170's
-    # 24576-byte ceiling, so it deploys to a stock chain. --disable-code-size-limit
-    # is left on as headroom in case other demo contracts grow; it is no longer
-    # required by the verifier itself.
+    # 24576-byte ceiling, so it deploys to a stock chain.
     POLICY_HASH="$PI_HEX_7" forge script contracts/script/Deploy.s.sol \
         --root contracts \
         --rpc-url "$RPC_URL" \
         --private-key "$PRIVATE_KEY" \
         --broadcast \
-        --disable-code-size-limit \
         > "$DEPLOY_LOG" 2>&1 || {
             echo "error: forge script Deploy.s.sol failed; see $DEPLOY_LOG" >&2
             tail -n 40 "$DEPLOY_LOG" >&2

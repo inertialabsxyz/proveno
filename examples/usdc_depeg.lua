@@ -1,12 +1,6 @@
--- usdc_depeg.lua: prove USDC's price in cents from a single venue.
---
--- Straight-line over one small response, so it stays inside the proving
--- envelope (no if/and: see GH #64; small body: see GH #65). `precision=4`
--- forces a "D.FFFF" string, so the cents parse needs no branching.
---
--- Peg floor is 95 cents; a healthy USDC returns ~100. A result below 95
--- means depegged. (The full multi-venue >=2-of-3 resolution is the #57
--- flagship and is grant scope, not this demo task.)
+-- Verifiable task: is USDC holding its $1 peg?
+-- Fetch USDC/USD from one venue and return the price in cents.
+-- A healthy peg returns ~100; a result below 95 means depegged.
 
 local r = tool.call("http_get", {
     url = "https://api.coingecko.com/api/v3/simple/price?ids=usd-coin&vs_currencies=usd&precision=4"

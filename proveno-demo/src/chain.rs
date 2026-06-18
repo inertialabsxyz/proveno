@@ -168,8 +168,9 @@ async fn init_managed_anvil() -> Result<(ChainConfig, Option<AnvilHandle>), Chai
 
     let rpc_url = format!("http://127.0.0.1:{ANVIL_PORT}");
 
-    // Boot anvil. --code-size-limit 65536 mirrors the CLI demo (the generated
-    // HonkVerifier is ~33 KB, over the default EIP-170 24576-byte ceiling).
+    // Boot anvil. --code-size-limit 65536 mirrors the CLI demo. The bb 5.0.0
+    // HonkVerifier is ~24.0 KB (23,977 B), under the default EIP-170 24576-byte
+    // ceiling, so the raised limit is headroom, not a requirement.
     let child = std::process::Command::new("anvil")
         .args([
             "--port",

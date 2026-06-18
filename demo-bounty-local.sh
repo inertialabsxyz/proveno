@@ -67,6 +67,10 @@ fi
 
 export RPC_URL="http://127.0.0.1:$PORT"
 export PRIVATE_KEY="$LOCAL_KEY"
+# Anvil account #1 as the solver (distinct from the account-0 poster, so the
+# payout shows on a different address). Exported here so it overrides any
+# SOLVER_KEY from .env, which would be a live-chain key with no anvil balance.
+export SOLVER_KEY="${SOLVER_KEY:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}"
 export DEPLOY=1
 
 # Use a normal call (not exec) so the EXIT trap still tears down anvil.

@@ -68,6 +68,37 @@ pub struct PublicInputs {
     pub policy_hash: [u8; 32], // Phase 2 stub
 }
 
+impl PublicInputs {
+    /// SHA-256 digest over all six commitments, in struct declaration order.
+    ///
+    /// ```text
+    /// digest = SHA256( program_hash ‖ input_hash ‖ tool_responses_hash
+    ///                  ‖ output_hash ‖ attestation_hash ‖ policy_hash )
+    /// ```
+    ///
+    /// A zkVM guest reveals this single 32-byte value rather than all 192
+    /// bytes: public values are a constrained resource (OpenVM's default
+    /// budget is 32 bytes) and each one costs proving work. A verifier
+    /// receives the six values out of band, recomputes the digest, and checks
+    /// it against the proof — the same journal-digest pattern other zkVMs use.
+    ///
+    /// The field order is fixed by this function and must not be reordered;
+    /// it is the wire format a verifier depends on. Note it is the *struct*
+    /// order, which is deliberately not the Noir circuit's public-input order
+    /// (see `contracts/src/Types.sol`) — the two backends are separate
+    /// verification paths and do not share a layout.
+    pub fn digest_sha256(&self) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(self.program_hash);
+        h.update(self.input_hash);
+        h.update(self.tool_responses_hash);
+        h.update(self.output_hash);
+        h.update(self.attestation_hash);
+        h.update(self.policy_hash);
+        h.finalize().into()
+    }
+}
+
 /// Compute the `input_hash` for a given `LuaValue`.
 ///
 /// SHA-256 of `canonical_serialize(v)`. If serialization fails (e.g. function
@@ -352,6 +383,63 @@ mod tests {
         let pi = compute_public_inputs_sha256([0u8; 32], &LuaValue::Nil, &tape, &output);
         assert_ne!(pi.tool_responses_hash, [0u8; 32]);
         assert_ne!(pi.attestation_hash, [0u8; 32]);
+    }
+
+    fn pi_fixture() -> PublicInputs {
+        PublicInputs {
+            program_hash: [1u8; 32],
+            input_hash: [2u8; 32],
+            tool_responses_hash: [3u8; 32],
+            output_hash: [4u8; 32],
+            attestation_hash: [5u8; 32],
+            policy_hash: [6u8; 32],
+        }
+    }
+
+    /// Golden vector computed independently: SHA-256 over the six 32-byte
+    /// fields concatenated in struct order. Pins the wire format a verifier
+    /// depends on.
+    #[test]
+    fn digest_sha256_matches_golden_vector() {
+        let hex: String = pi_fixture()
+            .digest_sha256()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            hex,
+            "4afae2731b9d72781409ee49414eba0a820bfa446703017ae764a728570bdbcd"
+        );
+    }
+
+    /// Every field must reach the digest: flipping any one of the six changes
+    /// it. A field silently dropped here would be a field the proof does not
+    /// actually bind.
+    #[test]
+    fn digest_sha256_covers_every_field() {
+        let base = pi_fixture().digest_sha256();
+        for i in 0..6 {
+            let mut pi = pi_fixture();
+            match i {
+                0 => pi.program_hash[0] ^= 1,
+                1 => pi.input_hash[0] ^= 1,
+                2 => pi.tool_responses_hash[0] ^= 1,
+                3 => pi.output_hash[0] ^= 1,
+                4 => pi.attestation_hash[0] ^= 1,
+                _ => pi.policy_hash[0] ^= 1,
+            }
+            assert_ne!(pi.digest_sha256(), base, "field {i} does not affect digest");
+        }
+    }
+
+    /// Field order is part of the wire format: swapping two fields must not
+    /// produce the same digest.
+    #[test]
+    fn digest_sha256_is_order_sensitive() {
+        let a = pi_fixture().digest_sha256();
+        let mut pi = pi_fixture();
+        core::mem::swap(&mut pi.program_hash, &mut pi.input_hash);
+        assert_ne!(pi.digest_sha256(), a);
     }
 
     #[test]

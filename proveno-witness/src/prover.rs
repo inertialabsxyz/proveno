@@ -21,10 +21,7 @@ pub struct Prover<H: HostInterface> {
 impl<H: HostInterface> Prover<H> {
     /// Create a new prover with the given VM config, live host, and registered tool names.
     pub fn new(config: VmConfig, host: H) -> Self {
-        Prover {
-            config,
-            host,
-        }
+        Prover { config, host }
     }
 
     /// Execute the program with the live host, record a transcript, and build an oracle tape.

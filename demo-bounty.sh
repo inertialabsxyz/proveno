@@ -175,7 +175,7 @@ if [[ -n "${LUA_SOURCE:-}" ]]; then
     echo
     cargo run --quiet -p proveno-compiler -- \
         "$LUA_SOURCE" "$PROVE_OUTPUT/compiled.json" >&2
-    cargo run --quiet -p proveno_prover --bin proveno-prover -- \
+    cargo run --quiet -p proveno-witness --bin proveno-witness -- \
         "$PROVE_OUTPUT/compiled.json" "$PROVE_OUTPUT/dry_result.json" >&2
     cargo run --quiet -p proveno-noir -- \
         "$PROVE_OUTPUT/compiled.json" "$PROVE_OUTPUT/dry_result.json" \
@@ -184,7 +184,7 @@ if [[ -n "${LUA_SOURCE:-}" ]]; then
         > "$ORCH_JSON"
 else
     step "[1/5] Generate the proof via the orchestrator (LLM)"
-    cargo run --quiet -p proveno-proveno-orchestrator -- \
+    cargo run --quiet -p proveno-orchestrator -- \
         "$TASK" \
         --prove \
         --json \

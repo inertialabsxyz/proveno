@@ -7,7 +7,7 @@
 #
 # Deterministic and fast (~3-4s prove). Requires `nargo` and `bb` on PATH.
 #
-# Recording tip: run `cargo build -p proveno-proveno-compiler -p proveno_prover \
+# Recording tip: run `cargo build -p proveno-compiler -p proveno-witness \
 #   -p proveno-noir` once first, so `cargo run --quiet` does NOT recompile (and
 #   therefore prints no warnings) during the take.
 
@@ -24,7 +24,7 @@ echo "── 1/3 · compile ─────────────────�
 cargo run --quiet -p proveno-compiler -- "$SRC" "$OUT/compiled.json"
 
 echo "── 2/3 · dry-run (live http_get → oracle tape) ────────────"
-cargo run --quiet -p proveno_prover --bin proveno-prover -- \
+cargo run --quiet -p proveno-witness --bin proveno-witness -- \
     "$OUT/compiled.json" "$OUT/dry_result.json"
 
 echo "── 3/3 · prove + verify (Noir UltraHonk) ──────────────────"

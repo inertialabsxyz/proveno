@@ -17,8 +17,8 @@ use proveno::{
     },
     vm::engine::{HostInterface, VmConfig},
 };
-use proveno_witness::prover::Prover;
 use proveno_verifier::build_test_proof;
+use proveno_witness::prover::Prover;
 
 /// Minimal host for the benchmark: supports `http_get` only.
 struct BenchHost {

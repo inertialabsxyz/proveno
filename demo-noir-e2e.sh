@@ -120,7 +120,7 @@ if [[ -n "${LUA_SOURCE:-}" ]]; then
     # compile → dry-run → prove; progress to stderr so stdout stays pure JSON.
     cargo run --quiet -p proveno-compiler -- \
         "$LUA_SOURCE" "$PROVE_OUTPUT/compiled.json" >&2
-    cargo run --quiet -p proveno_prover --bin proveno-prover -- \
+    cargo run --quiet -p proveno-witness --bin proveno-prover -- \
         "$PROVE_OUTPUT/compiled.json" "$PROVE_OUTPUT/dry_result.json" >&2
     cargo run --quiet -p proveno-noir -- \
         "$PROVE_OUTPUT/compiled.json" "$PROVE_OUTPUT/dry_result.json" \

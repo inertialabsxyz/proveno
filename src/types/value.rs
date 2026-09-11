@@ -1,5 +1,5 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
 use crate::types::table::{LuaKey, LuaTable};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 pub const MAX_TABLE_ENTRIES: usize = 50_000;
 
 #[derive(Debug)]

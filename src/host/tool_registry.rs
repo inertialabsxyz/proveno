@@ -412,7 +412,7 @@ mod tests {
         let record = &transcript.records()[0];
         assert!(record.gas_charged >= gas_cost::TOOL_CALL_BASE);
     }
-    
+
     mod policy_tests {
         use super::*;
         use crate::policy::{OraclePolicy, TlsRequirement};

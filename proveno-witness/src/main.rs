@@ -54,10 +54,7 @@ fn main() {
 
     let host = ProverHost::new();
     let vm_config = VmConfig::default();
-    let prover = Prover::new(
-        vm_config,
-        host
-    );
+    let prover = Prover::new(vm_config, host);
     let program: CompiledProgram = serde_json::from_str(&compiled).unwrap();
 
     let result = match policy_name.as_deref() {

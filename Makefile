@@ -1,4 +1,4 @@
-.PHONY: check lint test test-nostd test-prove build-openvm fix build dev act help
+.PHONY: check lint test test-nostd test-prove build-openvm prove-openvm fix build dev act help
 
 help:
 	@echo "Usage: make <target>"
@@ -12,6 +12,7 @@ help:
 	@echo "  test-nostd     no_std + no-poseidon builds (zkVM guest configurations)"
 	@echo "  test-prove     Noir nargo+bb prove/verify pipeline (slow; pre-PR gate)"
 	@echo "  build-openvm   build + transpile the OpenVM guest (needs cargo-openvm)"
+	@echo "  prove-openvm   full OpenVM pipeline on examples/simple.lua: compile -> prove -> verify"
 	@echo "  fix            auto-format + apply safe clippy fixes"
 	@echo "  build          cargo build"
 
@@ -58,6 +59,20 @@ test-nostd:
 #   cargo openvm run -p proveno-openvm --input 0x010a00000000000000
 build-openvm:
 	cargo openvm build -p proveno-openvm
+
+# End-to-end OpenVM proof of examples/simple.lua.
+#
+# compile -> dry run -> guest input -> app proof -> verify. Prints the expected
+# journal digest before proving; the guest reveals exactly that value.
+#
+# Needs cargo-openvm and a one-off `cargo openvm keygen --app-only` (writes
+# openvm/app.pk and openvm/app.vk, both gitignored). Not part of `make check`.
+prove-openvm:
+	cargo run -q -p proveno-compiler -- examples/simple.lua target/openvm-demo.compiled.json
+	cargo run -q -p proveno-witness -- target/openvm-demo.compiled.json target/openvm-demo.dry.json
+	cargo run -q -p proveno-openvm-host -- \
+		target/openvm-demo.compiled.json target/openvm-demo.dry.json \
+		--out target/openvm-demo.input.json --prove
 
 # Noir prove/verify pipeline (nargo execute + bb write_vk/prove/verify).
 # Slow (~30 s); not part of `make test`. Required pre-PR gate when touching

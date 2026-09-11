@@ -59,7 +59,8 @@ There is no separate lint command; `cargo test` exercises the full suite includi
 | `proveno-orchestrator` | LLM-driven agent loop (Claude API + live tool execution; `--prove` runs the full Noir pipeline) |
 | `proveno-noir` | Noir witness writer + `nargo`/`bb` prover driver (canonical proving path) |
 | `proveno-verifier` | Small helper binaries (e.g. `policy-hash` prints the canonical policy commitment) |
-| `proveno-openvm` | OpenVM zkVM guest (RISC-V). Smoke test only; builds `proveno` without `poseidon` |
+| `proveno-openvm` | OpenVM zkVM guest (RISC-V): replays a program and reveals the public-inputs digest |
+| `proveno-openvm-host` | Host driver for the OpenVM backend: builds guest input, drives prove/verify |
 
 Core library features: `default = ["std", "poseidon", "tls"]`, optional `serde`, optional `zkvm`.
 
@@ -150,6 +151,54 @@ Public inputs (8, in circuit-declaration order): `num_steps`, `program_hash`,
 `attestation_hash`, `policy_hash`. The Solidity `PublicInputs` struct in
 `contracts/src/Types.sol` mirrors this ordering exactly; reordering breaks
 verification.
+
+## OpenVM proving pipeline
+
+An alternative backend to the Noir path, committing with SHA-256 instead of
+Poseidon2. Requires `cargo-openvm` and a one-off keygen.
+
+```bash
+cargo openvm keygen --app-only        # writes openvm/app.pk + app.vk (gitignored)
+
+# 1+2. Compile and dry-run, exactly as the Noir path does
+cargo run -p proveno-compiler -- source.lua compiled.json
+cargo run -p proveno-witness  -- compiled.json dry_result.json
+
+# 3. Build the guest input, prove, verify
+cargo run -p proveno-openvm-host -- compiled.json dry_result.json --prove
+
+# Or the whole thing on examples/simple.lua
+make prove-openvm
+```
+
+The guest reads a `GuestInput`, replays the program against a `TapeHost`, and
+reveals a single 32-byte digest over the six public inputs
+(`PublicInputs::digest_sha256`) rather than all 192 bytes: OpenVM's default
+public-values budget is 32 bytes and each public value costs proving work. The
+verifier gets the six values out of band and recomputes the digest.
+
+Host and guest share one definition of the proven computation,
+`GuestInput::replay_public_inputs`. The driver runs it before proving, so a
+host/guest divergence surfaces as an error rather than as a proof revealing an
+unexpected digest.
+
+**What the proof does not bind:** `VmConfig`. The prover chooses the gas and
+memory limits, which determine whether execution completes or aborts.
+
+### Known gap: the Poseidon2 program hash does not cover constants
+
+`compute_program_hash` (the Noir path) hashes only the `(opcode, operand)`
+instruction stream. `PushK`, `GetField` and `SetField` carry a constant-pool
+*index*, so `return 1`, `return 2` and `return "omega"` all compile to the same
+stream and hash identically. A prover can swap every literal in a program and
+still match a committed `program_hash`.
+
+`compute_program_hash_sha256` (the OpenVM path) does not have this gap: it
+covers the constant pool, upvalue descriptors and prototype metadata. Closing it
+on the Noir side means changing `assert_bytecode` in `noir/src/main.nr` in
+lockstep, which invalidates existing verification keys. Pinned by
+`poseidon_program_hash_does_not_cover_constants_known_gap` in
+`src/noir/encoder.rs`, which fails once the gap is closed.
 
 ## Architecture
 

@@ -27,9 +27,15 @@ const USAGE: &str = "\
 Usage: proveno-openvm-host <compiled.json> <dry_result.json> [options]
 
 Options:
-  --out <path>   where to write the guest input JSON [default: openvm_input.json]
-  --prove        run `cargo openvm prove app` and `cargo openvm verify app`
-  --help         show this message";
+  --out <path>     where to write the guest input JSON [default: openvm_input.json]
+  --prove          generate and verify a proof
+  --stark          prove at the aggregated STARK level instead of `app`
+  --proof <path>   where to write the proof [default: <level>.proof]
+  --help           show this message
+
+Proof levels: `app` is the application STARK; `--stark` recursively aggregates
+its segments into a single root STARK. `app` needs `cargo openvm keygen
+--app-only`; `--stark` needs `cargo openvm keygen` with no flag (agg_prefix.pk).";
 
 /// Encode a value the way `openvm_sdk::StdIn::write` does, wrapped in the JSON
 /// envelope `cargo openvm --input <file>` expects.
@@ -46,6 +52,10 @@ fn encode_guest_input(input: &GuestInput) -> Result<String, String> {
     serde_json::to_string(&serde_json::json!({ "input": [hex] }))
         .map_err(|e| format!("building input envelope: {e}"))
 }
+
+/// Written by `cargo openvm prove stark`; `verify stark` cannot find it on its
+/// own because it guesses the workspace root package name.
+const BASELINE: &str = "openvm/release/proveno-openvm.baseline.json";
 
 fn hex32(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -88,10 +98,14 @@ fn run() -> Result<(), String> {
     let mut positional = Vec::new();
     let mut out_path = String::from("openvm_input.json");
     let mut prove = false;
+    let mut stark = false;
+    let mut proof_path: Option<String> = None;
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--prove" => prove = true,
+            "--stark" => stark = true,
+            "--proof" => proof_path = Some(it.next().ok_or("--proof requires a value")?),
             "--out" => out_path = it.next().ok_or("--out requires a value")?,
             other if other.starts_with("--") => {
                 return Err(format!("unknown option '{other}'\n\n{USAGE}"))
@@ -159,10 +173,32 @@ fn run() -> Result<(), String> {
     println!("Run it:   cargo openvm run -p proveno-openvm --input {out_path}");
 
     if prove {
-        run_openvm(&["prove", "app", "-p", "proveno-openvm", "--input", &out_path])?;
-        run_openvm(&["verify", "app"])?;
-        println!("\nProof generated and verified.");
-        println!("Check the revealed digest against: {}", hex32(&digest));
+        let level = if stark { "stark" } else { "app" };
+        let proof = proof_path.unwrap_or_else(|| format!("proveno-openvm.{level}.proof"));
+
+        run_openvm(&[
+            "prove",
+            level,
+            "-p",
+            "proveno-openvm",
+            "--input",
+            &out_path,
+            "--proof",
+            &proof,
+        ])?;
+
+        // `verify stark` derives the baseline path from the binary target name
+        // and guesses the root package, so it looks for proveno.baseline.json
+        // and fails. Point it at the real file.
+        let mut verify = vec!["verify", level, "--proof", proof.as_str()];
+        if stark {
+            verify.push("--app-baseline");
+            verify.push(BASELINE);
+        }
+        run_openvm(&verify)?;
+
+        println!("\n{level} proof generated and verified: {proof}");
+        println!("Revealed digest: {}", hex32(&digest));
     }
 
     Ok(())

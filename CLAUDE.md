@@ -155,21 +155,36 @@ verification.
 ## OpenVM proving pipeline
 
 An alternative backend to the Noir path, committing with SHA-256 instead of
-Poseidon2. Requires `cargo-openvm` and a one-off keygen.
+Poseidon2. Requires `cargo-openvm`; proving keys are generated on first use and
+cached in `openvm/` (gitignored).
 
 ```bash
-cargo openvm keygen --app-only        # writes openvm/app.pk + app.vk (gitignored)
+./prove-openvm.sh myscript.lua            # app STARK
+./prove-openvm.sh myscript.lua --stark    # aggregated (recursive) STARK
+```
 
-# 1+2. Compile and dry-run, exactly as the Noir path does
+That is compile → dry run → guest input → prove → verify in one command, leaving
+every artifact under `target/openvm/<name>.*`. The individual steps, if you need
+them:
+
+```bash
+cargo openvm keygen --app-only        # app level; drop the flag for --stark
 cargo run -p proveno-compiler -- source.lua compiled.json
 cargo run -p proveno-witness  -- compiled.json dry_result.json
-
-# 3. Build the guest input, prove, verify
-cargo run -p proveno-openvm-host -- compiled.json dry_result.json --prove
-
-# Or the whole thing on examples/simple.lua
-make prove-openvm
+cargo run -p proveno-openvm-host -- compiled.json dry_result.json --prove [--stark]
 ```
+
+`make prove-openvm` runs the whole thing on `examples/simple.lua`.
+
+### Proof levels
+
+| level | what it is |
+|---|---|
+| `app` | the application STARK (default) |
+| `stark` | app segments aggregated recursively into one root STARK (`--stark`) |
+| `evm` | Halo2 SNARK wrapper for on-chain verification (not wired up) |
+
+Baseline timings and scaling fits are in `examples/bench/RESULTS.md`.
 
 The guest reads a `GuestInput`, replays the program against a `TapeHost`, and
 reveals a single 32-byte digest over the six public inputs

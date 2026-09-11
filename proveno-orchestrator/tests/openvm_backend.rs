@@ -64,15 +64,29 @@ fn openvm_backend_proves_and_verifies() {
 #[ignore = "needs cargo-openvm and proving keys; ~10s"]
 fn openvm_backend_commits_the_policy_hash() {
     let with = run("return 1 + 2", Some(POLICY));
-    let ov = with.openvm_proof.expect("openvm summary present");
+    let ov = with.openvm_proof.as_ref().expect("openvm summary present");
     assert!(ov.verified);
 
     let expected = OraclePolicy::load_spec(POLICY).unwrap().policy_hash();
     let expected_hex: String = expected.iter().map(|b| format!("{b:02x}")).collect();
 
+    // Regression: the reported public inputs must be the ones this proof
+    // actually commits. build_proof_artifacts fills them with the Poseidon2
+    // scheme the Noir path uses, which reported policy_hash as all-zero and
+    // "(no policy attached)" for proofs that had bound the policy correctly.
+    assert_eq!(
+        with.public_inputs.policy_hash, expected,
+        "reported policy_hash is not the one the proof commits"
+    );
+    assert_ne!(with.public_inputs.policy_hash, [0u8; 32]);
+
     // The digest commits policy_hash, so attaching a policy must change it.
     let without = run("return 1 + 2", None);
-    let ov_without = without.openvm_proof.expect("openvm summary present");
+    let ov_without = without
+        .openvm_proof
+        .as_ref()
+        .expect("openvm summary present");
+    assert_eq!(without.public_inputs.policy_hash, [0u8; 32]);
     assert_ne!(
         ov.digest, ov_without.digest,
         "attaching policy {expected_hex} did not change the journal digest"

@@ -203,6 +203,40 @@ pub fn build_proof_artifacts_with_openvm(
         .trim()
         .to_string();
 
+    // `build_proof_artifacts` fills `public_inputs` with the Poseidon2 scheme
+    // the Noir path uses. Those are not what this proof commits: the OpenVM
+    // guest uses SHA-256 throughout and derives `policy_hash` itself. Leaving
+    // the Poseidon2 values in place made the report print `policy_hash` as zero
+    // and "(no policy attached)" for a proof that had in fact bound the policy.
+    let dry_json = fs::read_to_string(&artifacts.dry_result_path).map_err(|e| {
+        format!(
+            "failed to read {}: {e}",
+            artifacts.dry_result_path.display()
+        )
+    })?;
+    let dry: DryRunResult = serde_json::from_str(&dry_json)
+        .map_err(|e| format!("failed to parse dry_result.json: {e}"))?;
+
+    let mut guest_input = proveno::zkvm::guest_input::GuestInput::new(
+        serde_json::from_str(
+            &fs::read_to_string(&artifacts.compiled_path)
+                .map_err(|e| format!("failed to read compiled.json: {e}"))?,
+        )
+        .map_err(|e| format!("failed to parse compiled.json: {e}"))?,
+        input.clone(),
+        dry.oracle_tape.clone(),
+        proveno::vm::engine::VmConfig::default(),
+        Vec::new(),
+    );
+    if let Some(spec) = policy_spec {
+        let policy = proveno::policy::OraclePolicy::load_spec(spec)?;
+        guest_input = guest_input.with_policy_canonical(policy.canonical_bytes());
+    }
+    match guest_input.replay_public_inputs() {
+        Ok((_, pi)) => artifacts.public_inputs = pi,
+        Err(e) => return Err(format!("recomputing OpenVM public inputs: {e:?}")),
+    }
+
     artifacts.openvm_proof = Some(OpenVmProveSummary {
         level: level.to_string(),
         proof_path,

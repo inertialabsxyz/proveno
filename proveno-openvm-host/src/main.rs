@@ -18,6 +18,7 @@ use std::{env, fs, process::Command};
 
 use proveno::{
     compiler::proto::CompiledProgram,
+    host::canonicalize::canonical_serialize,
     types::value::LuaValue,
     vm::engine::VmConfig,
     zkvm::{commitment::PublicInputs, dry_run_result::DryRunResult, guest_input::GuestInput},
@@ -151,14 +152,26 @@ fn run() -> Result<(), String> {
         .map_err(|e| format!("host replay failed, so the guest would too: {e:?}"))?;
     let digest = expected.digest_sha256();
 
-    if output.return_value != dry.output.return_value {
+    // Compare canonical bytes, not `LuaValue` equality: `LuaValue::Table` uses
+    // `Rc::ptr_eq` (correct Lua identity semantics), so two structurally
+    // identical tables from separate runs are never `==`. Canonical
+    // serialization is also the encoding the commitments hash, which makes it
+    // the right notion of "same result" here.
+    let canon =
+        |v: &LuaValue| canonical_serialize(v).unwrap_or_else(|_| b"<unserializable>".to_vec());
+    let (replayed, recorded) = (canon(&output.return_value), canon(&dry.output.return_value));
+    if replayed != recorded {
         return Err(format!(
-            "replay diverged from the dry run: dry run returned {:?}, replay returned {:?}",
-            dry.output.return_value, output.return_value
+            "replay diverged from the dry run:\n  dry run returned {}\n  replay  returned {}",
+            String::from_utf8_lossy(&recorded),
+            String::from_utf8_lossy(&replayed)
         ));
     }
 
-    println!("Replayed return value: {:?}", output.return_value);
+    println!(
+        "Replayed return value: {}",
+        String::from_utf8_lossy(&replayed)
+    );
     println!("\nPublic inputs (SHA-256 scheme):");
     print_public_inputs(&expected);
     println!("\nExpected journal digest: {}", hex32(&digest));
@@ -245,6 +258,35 @@ mod tests {
         assert_eq!(out_a.return_value, out_b.return_value);
         assert_eq!(pi_a, pi_b);
         assert_eq!(pi_a.digest_sha256(), pi_b.digest_sha256());
+    }
+
+    /// Regression: the divergence check must compare canonical bytes, not
+    /// `LuaValue` equality.
+    ///
+    /// `LuaValue::Table` compares with `Rc::ptr_eq` (correct Lua identity
+    /// semantics), so two structurally identical tables built by separate runs
+    /// are never `==`. Checking with `!=` rejected every table-returning
+    /// program as "diverged" and refused to prove it — which is exactly what
+    /// happened to examples/window_max_breach.lua.
+    #[test]
+    fn table_returning_program_is_not_reported_as_diverged() {
+        let input = guest_input_for("local t = {} t.a = 1 t.b = 2 return t");
+        let (a, _) = input.replay_public_inputs().unwrap();
+        let (b, _) = input.replay_public_inputs().unwrap();
+
+        // The trap: identical tables from two runs compare unequal.
+        assert_ne!(
+            a.return_value, b.return_value,
+            "LuaValue::Table is identity-compared; if this ever changes, the \
+             canonical-bytes comparison below is still correct but this test's \
+             premise is stale"
+        );
+
+        // What the driver actually checks, and what the commitments hash.
+        let ca = canonical_serialize(&a.return_value).unwrap();
+        let cb = canonical_serialize(&b.return_value).unwrap();
+        assert_eq!(ca, cb);
+        assert_eq!(String::from_utf8_lossy(&ca), r#"{"a":1,"b":2}"#);
     }
 
     /// Tapes carry arbitrary response bytes, including non-UTF8, so the encoding

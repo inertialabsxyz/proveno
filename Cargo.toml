@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["proveno-compiler", "proveno-orchestrator","proveno-witness","verifier","proveno-noir","proveno-demo"]
+members = ["proveno-compiler", "proveno-orchestrator","proveno-witness","verifier","proveno-noir","proveno-demo","proveno-openvm"]
 resolver = "2"
 
 [features]

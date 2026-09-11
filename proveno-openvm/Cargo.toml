@@ -1,0 +1,20 @@
+[package]
+name = "proveno-openvm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.2", features = ["std"] }
+# Accelerated SHA-256: one instruction per 64-byte block via the sha256 chip
+# enabled in openvm.toml. `openvm_sha2::Sha256` is a drop-in for
+# `sha2::Sha256` — same streaming new/update/finalize API, re-exported from
+# `sha2` itself on host targets — so proveno's hashing could route through it
+# behind a type alias. Not wired up yet; see the note in src/main.rs.
+openvm-sha2 = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.2" }
+
+# `default-features = false` is load-bearing, not tidiness: the default
+# `poseidon` feature pulls bn254_blackbox_solver -> wasmer -> cranelift ->
+# target-lexicon 0.12, whose build script hard-panics on the custom RISC-V
+# target triple this crate compiles for. `zkvm` brings in PublicInputs and the
+# SHA-256 commitment helpers, which is the guest-side commitment scheme.
+proveno = { path = "../", default-features = false, features = ["zkvm"] }

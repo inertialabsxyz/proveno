@@ -3225,6 +3225,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "openvm-sha2"
+version = "2.0.2"
+source = "git+https://github.com/openvm-org/openvm.git?tag=v2.0.2#59a69b8b0cbee7011ac978e4cc07707ee3681944"
+dependencies = [
+ "openvm-sha2-guest",
+ "sha2",
+]
+
+[[package]]
+name = "openvm-sha2-guest"
+version = "2.0.2"
+source = "git+https://github.com/openvm-org/openvm.git?tag=v2.0.2#59a69b8b0cbee7011ac978e4cc07707ee3681944"
+dependencies = [
+ "openvm-platform",
+]
+
+[[package]]
 name = "p256"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3592,6 +3609,7 @@ name = "proveno-openvm"
 version = "0.1.0"
 dependencies = [
  "openvm",
+ "openvm-sha2",
  "proveno",
 ]
 

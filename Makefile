@@ -1,4 +1,4 @@
-.PHONY: check lint test test-nostd test-prove fix build dev act help
+.PHONY: check lint test test-nostd test-prove build-openvm fix build dev act help
 
 help:
 	@echo "Usage: make <target>"
@@ -11,6 +11,7 @@ help:
 	@echo "  test-int       integration tests only (cargo test --tests)"
 	@echo "  test-nostd     no_std + no-poseidon builds (zkVM guest configurations)"
 	@echo "  test-prove     Noir nargo+bb prove/verify pipeline (slow; pre-PR gate)"
+	@echo "  build-openvm   build + transpile the OpenVM guest (needs cargo-openvm)"
 	@echo "  fix            auto-format + apply safe clippy fixes"
 	@echo "  build          cargo build"
 
@@ -46,6 +47,17 @@ test-nostd:
 	RUSTFLAGS="-D warnings" cargo build -p proveno --no-default-features --features zkvm
 	RUSTFLAGS="-D warnings" cargo build -p proveno --no-default-features --features "std,zkvm"
 	cargo test -p proveno --no-default-features --features "std,zkvm"
+
+# Build and transpile the OpenVM guest for riscv32im-risc0-zkvm-elf.
+#
+# Not part of `make check`: it needs the cargo-openvm CLI and the pinned
+# nightly toolchain. `make test-nostd` already covers the feature
+# configurations this depends on, which is what actually breaks.
+#
+# To execute the guest and see it reveal proveno's SHA-256 tape commitment:
+#   cargo openvm run -p proveno-openvm --input 0x010a00000000000000
+build-openvm:
+	cargo openvm build -p proveno-openvm
 
 # Noir prove/verify pipeline (nargo execute + bb write_vk/prove/verify).
 # Slow (~30 s); not part of `make test`. Required pre-PR gate when touching

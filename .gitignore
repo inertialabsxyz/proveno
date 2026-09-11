@@ -3,3 +3,6 @@
 *.bin
 !contracts/test/fixtures/*.bin
 contracts/broadcast/
+
+# Transpiled OpenVM guest artifacts (cargo openvm build output)
+/openvm

@@ -59,8 +59,40 @@ There is no separate lint command; `cargo test` exercises the full suite includi
 | `proveno-orchestrator` | LLM-driven agent loop (Claude API + live tool execution; `--prove` runs the full Noir pipeline) |
 | `proveno-noir` | Noir witness writer + `nargo`/`bb` prover driver (canonical proving path) |
 | `proveno-verifier` | Small helper binaries (e.g. `policy-hash` prints the canonical policy commitment) |
+| `proveno-openvm` | OpenVM zkVM guest (RISC-V). Smoke test only; builds `proveno` without `poseidon` |
 
-Core library features: `default = ["std"]`, optional `serde`, optional `zkvm`. The `zkvm` feature exposes `PublicInputs` / commitment helpers used by the Noir proving path.
+Core library features: `default = ["std", "poseidon", "tls"]`, optional `serde`, optional `zkvm`.
+
+| Feature | Role |
+|---|---|
+| `std` | Standard library. Off = `no_std` + `alloc`. Also gates `policy` (needs `serde_json`) |
+| `poseidon` | BN254 Poseidon2 commitments, byte-identical to the Noir circuit |
+| `tls` | TLS attestation producer (cert-chain verification). Implies `poseidon` |
+| `zkvm` | `PublicInputs` and the commitment helpers |
+
+**`poseidon` must be off for zkVM guest builds.** It pulls `bn254_blackbox_solver`
+→ wasmer → cranelift → target-lexicon 0.12, whose build script hard-panics on
+custom RISC-V target triples, and cargo runs that build script whether or not
+the code is ever linked. Without it the dependency tree drops from 523 entries
+to 22.
+
+### Two commitment schemes
+
+`program_hash`, `tool_responses_hash`, and `attestation_hash` are
+**backend-specific**. `input_hash` (SHA-256) and `output_hash` (keccak256) are
+not — they are fixed by their consumers.
+
+| Backend | Scheme | Constructor |
+|---|---|---|
+| Noir / UltraHonk | Poseidon2 | `compute_public_inputs` |
+| zkVM (OpenVM) | SHA-256 | `compute_public_inputs_sha256` |
+
+Poseidon2 is right inside a circuit, where BN254 is native and SHA-256 costs
+~25k constraints per block. In a RISC-V zkVM the cost model inverts: one
+Poseidon2 permutation is 488 software 254-bit modmuls absorbing 3 bytes (rate 3,
+byte-per-field), against one accelerated instruction per 64-byte block for
+SHA-256. The two are **not interchangeable** — a verifier must recompute with
+the scheme the prover used.
 
 ## Resource limits (defaults)
 

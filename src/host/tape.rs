@@ -19,12 +19,7 @@ use crate::{
     vm::engine::HostInterface,
 };
 #[cfg(not(feature = "std"))]
-use alloc::{
-    borrow::ToOwned,
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{borrow::ToOwned, format, string::String, vec::Vec};
 use sha2::{Digest, Sha256};
 
 // ── TapeEntry ────────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 use crate::compiler::proto::CompiledProgram;
 #[cfg(feature = "poseidon")]
 use crate::host::poseidon2::{field_to_be_bytes32, i64_to_field, poseidon2_hash, u8_to_field};
+use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
 
 use super::opcodes::{instruction_to_opcode_id, instruction_to_operand};

@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-#[cfg(not(feature = "std"))]
+// `alloc` is available under `std` too, so this is unconditional: modules
+// can then use `alloc::` paths without a `cfg` on every import.
 extern crate alloc;
 
 pub mod bytecode;

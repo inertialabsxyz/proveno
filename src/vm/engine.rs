@@ -1,4 +1,5 @@
-use std::{cell::RefCell, rc::Rc};
+use alloc::{boxed::Box, format, rc::Rc, string::String, vec, vec::Vec};
+use core::cell::RefCell;
 
 use crate::{
     compiler::proto::{CompiledProgram, Constant, Instruction, UpvalueDesc},
@@ -194,6 +195,7 @@ impl<H: HostInterface> Vm<H> {
         }
     }
 
+    #[cfg(feature = "std")]
     /// Create a VM with an attached `OraclePolicy`. Tool calls are checked
     /// against the policy's domain allowlist, method restriction, and schemas.
     pub fn new_with_policy(config: VmConfig, host: H, policy: crate::policy::OraclePolicy) -> Self {

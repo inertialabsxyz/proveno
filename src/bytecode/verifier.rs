@@ -1,5 +1,5 @@
 use crate::compiler::proto::{CompiledProgram, Constant, FunctionProto, Instruction};
-use std::collections::VecDeque;
+use alloc::{collections::VecDeque, vec, vec::Vec};
 
 pub const MAX_STACK_DEPTH: usize = 256;
 

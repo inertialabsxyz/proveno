@@ -1,12 +1,14 @@
 //! `ToolRegistry` — wraps `HostInterface` and enforces VM-side quotas and policy.
 
+#[cfg(feature = "std")]
+use crate::types::table::LuaKey;
 use crate::{
     host::{
         canonicalize::{CanonError, canonical_serialize_table},
         transcript::Transcript,
     },
     types::{
-        table::{LuaKey, LuaTable},
+        table::LuaTable,
         value::{LuaString, LuaValue},
     },
     vm::{
@@ -21,6 +23,9 @@ pub struct ToolRegistry<H: HostInterface> {
     calls_made: usize,
     total_bytes_in: usize,
     total_bytes_out: usize,
+    /// Policy enforcement needs `serde_json` for schema validation, so it
+    /// rides on the `std` feature.
+    #[cfg(feature = "std")]
     policy: Option<crate::policy::OraclePolicy>,
 }
 
@@ -31,10 +36,12 @@ impl<H: HostInterface> ToolRegistry<H> {
             calls_made: 0,
             total_bytes_in: 0,
             total_bytes_out: 0,
+            #[cfg(feature = "std")]
             policy: None,
         }
     }
 
+    #[cfg(feature = "std")]
     /// Create a registry with an attached policy. Tool calls are checked against
     /// the policy's domain allowlist, method restriction, and response schemas.
     pub fn with_policy(host: H, policy: crate::policy::OraclePolicy) -> Self {
@@ -89,6 +96,7 @@ impl<H: HostInterface> ToolRegistry<H> {
         }
 
         // 4. Policy: HTTP method and domain allowlist checks.
+        #[cfg(feature = "std")]
         if let Some(ref policy) = self.policy
             && is_http_tool(name)
         {
@@ -124,6 +132,7 @@ impl<H: HostInterface> ToolRegistry<H> {
                 }
 
                 // 7c. Policy: response schema validation.
+                #[cfg(feature = "std")]
                 if let Some(ref policy) = self.policy
                     && is_http_tool(name)
                 {
@@ -170,11 +179,13 @@ impl<H: HostInterface> ToolRegistry<H> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "std")]
 fn is_http_tool(name: &str) -> bool {
     matches!(name, "http_get" | "http_post")
 }
 
 /// Extract the `url` string from a LuaTable args argument.
+#[cfg(feature = "std")]
 fn get_url_from_args(args: &LuaTable) -> Option<String> {
     let key = LuaKey::String(LuaString::from_str("url"));
     match args.get(&key) {
@@ -308,6 +319,45 @@ mod tests {
         assert_eq!(attested.commitment_hash(), unattested.commitment_hash());
     }
 
+    /// The SHA-256 counterpart: the host -> transcript -> tape provenance bind
+    /// must hold under whichever commitment scheme the backend uses.
+    #[test]
+    fn attestation_binds_tape_under_sha256_scheme() {
+        use crate::host::tape::OracleTape;
+
+        let host = AttestingHost {
+            response: make_response_table(),
+            attestation: b"provider-sig".to_vec(),
+        };
+        let mut registry = ToolRegistry::new(host);
+        let mut gas = make_gas();
+        let mut transcript = Transcript::new();
+        let config = make_config();
+        let args = make_empty_table();
+
+        registry
+            .call("http_get", &args, &config, &mut gas, &mut transcript)
+            .unwrap();
+        assert_eq!(transcript.records()[0].attestation, b"provider-sig");
+
+        let attested = OracleTape::from_records(transcript.records());
+        let mut plain = Transcript::new();
+        let mut plain_registry = ToolRegistry::new(MockHost::ok(make_response_table()));
+        plain_registry
+            .call("http_get", &args, &config, &mut gas, &mut plain)
+            .unwrap();
+        let unattested = OracleTape::from_records(plain.records());
+
+        assert_ne!(
+            attested.attestation_commitment_sha256(),
+            unattested.attestation_commitment_sha256()
+        );
+        assert_eq!(
+            attested.commitment_hash_sha256(),
+            unattested.commitment_hash_sha256()
+        );
+    }
+
     #[test]
     fn max_tool_calls_exceeded() {
         let mut registry = ToolRegistry::new(MockHost::ok(make_empty_table()));
@@ -414,6 +464,7 @@ mod tests {
         assert!(record.gas_charged >= gas_cost::TOOL_CALL_BASE);
     }
 
+    #[cfg(feature = "std")]
     mod policy_tests {
         use super::*;
         use crate::policy::{OraclePolicy, TlsRequirement};

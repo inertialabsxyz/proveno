@@ -1,4 +1,4 @@
-.PHONY: check lint test test-prove fix build dev act help
+.PHONY: check lint test test-nostd test-prove fix build dev act help
 
 help:
 	@echo "Usage: make <target>"
@@ -9,12 +9,13 @@ help:
 	@echo "  test           all tests: unit + integration"
 	@echo "  test-unit      unit tests only (cargo test --lib)"
 	@echo "  test-int       integration tests only (cargo test --tests)"
+	@echo "  test-nostd     no_std + no-poseidon builds (zkVM guest configurations)"
 	@echo "  test-prove     Noir nargo+bb prove/verify pipeline (slow; pre-PR gate)"
 	@echo "  fix            auto-format + apply safe clippy fixes"
 	@echo "  build          cargo build"
 
 # CI target — must pass before merging
-check: lint test
+check: lint test test-nostd
 
 # Format check + clippy (warnings are errors)
 lint:
@@ -32,6 +33,19 @@ test-unit:
 # Integration tests only
 test-integration:
 	cargo test --tests
+
+# The feature configurations a zkVM guest builds under. `poseidon` pulls in
+# wasmer -> cranelift -> target-lexicon, whose build script rejects custom
+# RISC-V target triples, so the guest must compile without it. Warnings are
+# errors here: an unused import under one feature set is a real defect.
+#
+# These are builds, not test runs — the point is that the configurations
+# compile at all. `test` already runs the suite under default features.
+test-nostd:
+	RUSTFLAGS="-D warnings" cargo build -p proveno --no-default-features
+	RUSTFLAGS="-D warnings" cargo build -p proveno --no-default-features --features zkvm
+	RUSTFLAGS="-D warnings" cargo build -p proveno --no-default-features --features "std,zkvm"
+	cargo test -p proveno --no-default-features --features "std,zkvm"
 
 # Noir prove/verify pipeline (nargo execute + bb write_vk/prove/verify).
 # Slow (~30 s); not part of `make test`. Required pre-PR gate when touching

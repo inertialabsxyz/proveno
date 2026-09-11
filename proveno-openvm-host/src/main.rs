@@ -19,6 +19,7 @@ use std::{env, fs, process::Command};
 use proveno::{
     compiler::proto::CompiledProgram,
     host::canonicalize::canonical_serialize,
+    policy::OraclePolicy,
     types::value::LuaValue,
     vm::engine::VmConfig,
     zkvm::{commitment::PublicInputs, dry_run_result::DryRunResult, guest_input::GuestInput},
@@ -28,6 +29,8 @@ const USAGE: &str = "\
 Usage: proveno-openvm-host <compiled.json> <dry_result.json> [options]
 
 Options:
+  --policy <spec>  profile name or path to a JSON policy file; its canonical
+                   bytes are shipped to the guest, which hashes them itself
   --out <path>     where to write the guest input JSON [default: openvm_input.json]
   --prove          generate and verify a proof
   --stark          prove at the aggregated STARK level instead of `app`
@@ -71,12 +74,46 @@ fn print_public_inputs(pi: &PublicInputs) {
     println!("  policy_hash         {}", hex32(&pi.policy_hash));
 }
 
+/// The directory holding `openvm.toml`, found by walking up from the current
+/// directory.
+///
+/// `cargo openvm` resolves both its manifest and its app config from the
+/// working directory, so running it from anywhere other than the workspace
+/// root picks up the wrong `Cargo.toml` — under `cargo test` the working
+/// directory is the calling crate's root, and the build then fails trying to
+/// compile whatever binaries that crate happens to have.
+fn workspace_root() -> Option<std::path::PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join("openvm.toml").is_file() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// Resolve a path against the current directory before we move away from it.
+fn absolutize(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() {
+        return path.to_string();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(p).display().to_string())
+        .unwrap_or_else(|_| path.to_string())
+}
+
 /// Run a `cargo openvm` subcommand, streaming its output.
 fn run_openvm(args: &[&str]) -> Result<(), String> {
     println!("\n$ cargo openvm {}", args.join(" "));
-    let status = Command::new("cargo")
-        .arg("openvm")
-        .args(args)
+    let mut cmd = Command::new("cargo");
+    cmd.arg("openvm").args(args);
+    if let Some(root) = workspace_root() {
+        cmd.current_dir(root);
+    }
+    let status = cmd
         .status()
         .map_err(|e| format!("running `cargo openvm {}`: {e}", args.join(" ")))?;
     if status.success() {
@@ -101,12 +138,14 @@ fn run() -> Result<(), String> {
     let mut prove = false;
     let mut stark = false;
     let mut proof_path: Option<String> = None;
+    let mut policy_spec: Option<String> = None;
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--prove" => prove = true,
             "--stark" => stark = true,
             "--proof" => proof_path = Some(it.next().ok_or("--proof requires a value")?),
+            "--policy" => policy_spec = Some(it.next().ok_or("--policy requires a value")?),
             "--out" => out_path = it.next().ok_or("--out requires a value")?,
             other if other.starts_with("--") => {
                 return Err(format!("unknown option '{other}'\n\n{USAGE}"))
@@ -136,13 +175,29 @@ fn run() -> Result<(), String> {
     let input_value = LuaValue::Nil;
     let config = VmConfig::default();
 
-    let guest_input = GuestInput::new(
+    // The policy must be the same one proveno-witness enforced during the dry
+    // run. Nothing here can check that, so mismatching the two produces a proof
+    // naming a policy the execution did not actually run under.
+    let policy = match policy_spec.as_deref() {
+        Some(spec) => Some(OraclePolicy::load_spec(spec)?),
+        None => None,
+    };
+
+    let mut guest_input = GuestInput::new(
         program,
         input_value,
         dry.oracle_tape.clone(),
         config,
         Vec::new(),
     );
+    if let Some(ref p) = policy {
+        guest_input = guest_input.with_policy_canonical(p.canonical_bytes());
+        println!(
+            "Policy: {}  hash={}",
+            policy_spec.as_deref().unwrap_or("?"),
+            hex32(&p.policy_hash())
+        );
+    }
 
     // Runs the same replay the guest will, via the same function. Doing it here
     // first means a divergence surfaces as a plain error rather than as a proof
@@ -189,21 +244,24 @@ fn run() -> Result<(), String> {
         let level = if stark { "stark" } else { "app" };
         let proof = proof_path.unwrap_or_else(|| format!("proveno-openvm.{level}.proof"));
 
+        // Resolve before `run_openvm` changes directory.
+        let abs_input = absolutize(&out_path);
+        let abs_proof = absolutize(&proof);
         run_openvm(&[
             "prove",
             level,
             "-p",
             "proveno-openvm",
             "--input",
-            &out_path,
+            &abs_input,
             "--proof",
-            &proof,
+            &abs_proof,
         ])?;
 
         // `verify stark` derives the baseline path from the binary target name
         // and guesses the root package, so it looks for proveno.baseline.json
         // and fails. Point it at the real file.
-        let mut verify = vec!["verify", level, "--proof", proof.as_str()];
+        let mut verify = vec!["verify", level, "--proof", abs_proof.as_str()];
         if stark {
             verify.push("--app-baseline");
             verify.push(BASELINE);

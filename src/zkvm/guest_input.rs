@@ -15,8 +15,9 @@ use crate::{
         engine::{Vm, VmConfig, VmOutput},
         gas::VmError,
     },
-    zkvm::commitment::{PublicInputs, compute_public_inputs_sha256},
+    zkvm::commitment::{PublicInputs, compute_public_inputs_sha256_with_policy_hash},
 };
+use sha2::{Digest, Sha256};
 
 /// Everything the zkVM guest needs to replay an agent execution deterministically.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -31,6 +32,16 @@ pub struct GuestInput {
     pub config: VmConfig,
     /// Tool names registered in the dry run (used to build the ToolRegistry inside the guest).
     pub tool_names: Vec<String>,
+    /// `OraclePolicy::canonical_bytes()` of the policy in force, or empty when
+    /// no policy was attached.
+    ///
+    /// The guest hashes these itself rather than being handed a `policy_hash`,
+    /// so the committed hash provably corresponds to this document and a
+    /// prover cannot assert an unrelated one. The policy is carried as bytes
+    /// because `OraclePolicy` needs `serde_json` for its schemas and the guest
+    /// is `no_std`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub policy_canonical: Vec<u8>,
 }
 
 impl GuestInput {
@@ -51,6 +62,13 @@ impl GuestInput {
     /// Replay uses a [`TapeHost`], so no external calls happen and the run is
     /// bit-identical to the host dry run that produced the tape.
     ///
+    /// `policy_hash` is SHA-256 of [`Self::policy_canonical`], matching
+    /// `OraclePolicy::policy_hash` byte for byte, and is all-zero when no
+    /// policy is attached. This **binds** the policy document, it does not
+    /// verify compliance: the policy is enforced host-side during the dry run
+    /// via `ToolRegistry::with_policy`, and the guest does not re-check it.
+    /// Same boundary as `attestation_hash`.
+    ///
     /// Not bound: [`VmConfig`]. The prover picks the gas and memory limits,
     /// which decide whether execution completes or aborts. Committing to the
     /// config is follow-on work.
@@ -58,11 +76,17 @@ impl GuestInput {
         let program_hash = compute_program_hash_sha256(&self.program.prototypes);
         let mut vm = Vm::new(self.config.clone(), TapeHost::new(self.oracle_tape.clone()));
         let output = vm.execute(&self.program, self.input_value.clone())?;
-        let public_inputs = compute_public_inputs_sha256(
+        let policy_hash = if self.policy_canonical.is_empty() {
+            [0u8; 32]
+        } else {
+            Sha256::digest(&self.policy_canonical).into()
+        };
+        let public_inputs = compute_public_inputs_sha256_with_policy_hash(
             program_hash,
             &self.input_value,
             &self.oracle_tape,
             &output,
+            policy_hash,
         );
         Ok((output, public_inputs))
     }
@@ -80,7 +104,14 @@ impl GuestInput {
             oracle_tape,
             config,
             tool_names,
+            policy_canonical: Vec::new(),
         }
+    }
+
+    /// Attach the policy whose `canonical_bytes()` these are.
+    pub fn with_policy_canonical(mut self, canonical: Vec<u8>) -> Self {
+        self.policy_canonical = canonical;
+        self
     }
 }
 
@@ -135,6 +166,68 @@ mod tests {
         assert_eq!(honest_pi.program_hash, tampered_pi.program_hash);
         assert_ne!(honest_pi.program_hash, [0xAA; 32]);
         assert_eq!(honest_pi.digest_sha256(), tampered_pi.digest_sha256());
+    }
+
+    // ── Policy binding ───────────────────────────────────────────────────────
+
+    #[test]
+    fn no_policy_gives_a_zero_policy_hash() {
+        let (_, pi) = guest_input_for("return 1").replay_public_inputs().unwrap();
+        assert_eq!(pi.policy_hash, [0u8; 32]);
+    }
+
+    /// The whole point of shipping canonical bytes rather than a hash: what the
+    /// guest commits must equal what `OraclePolicy::policy_hash` produces on
+    /// the host, or the two sides disagree about which policy was in force.
+    #[cfg(feature = "std")]
+    #[test]
+    fn guest_policy_hash_matches_oracle_policy_hash() {
+        let policy = crate::policy::profiles::constrained_http_v1();
+        let input = guest_input_for("return 1").with_policy_canonical(policy.canonical_bytes());
+
+        let (_, pi) = input.replay_public_inputs().unwrap();
+        assert_eq!(pi.policy_hash, policy.policy_hash());
+        assert_ne!(pi.policy_hash, [0u8; 32]);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn different_policies_give_different_digests() {
+        let a = crate::policy::profiles::constrained_http_v1();
+        let b = crate::policy::profiles::template_price_feed_v1();
+
+        let (_, pa) = guest_input_for("return 1")
+            .with_policy_canonical(a.canonical_bytes())
+            .replay_public_inputs()
+            .unwrap();
+        let (_, pb) = guest_input_for("return 1")
+            .with_policy_canonical(b.canonical_bytes())
+            .replay_public_inputs()
+            .unwrap();
+
+        assert_ne!(pa.policy_hash, pb.policy_hash);
+        assert_ne!(pa.digest_sha256(), pb.digest_sha256());
+    }
+
+    /// A prover editing the policy bytes cannot keep the old hash, because the
+    /// guest derives the hash from the bytes rather than accepting one.
+    #[cfg(feature = "std")]
+    #[test]
+    fn tampering_policy_bytes_changes_the_committed_hash() {
+        let policy = crate::policy::profiles::constrained_http_v1();
+        let honest = policy.canonical_bytes();
+        let mut tampered = honest.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+
+        let (_, pa) = guest_input_for("return 1")
+            .with_policy_canonical(honest)
+            .replay_public_inputs()
+            .unwrap();
+        let (_, pb) = guest_input_for("return 1")
+            .with_policy_canonical(tampered)
+            .replay_public_inputs()
+            .unwrap();
+        assert_ne!(pa.policy_hash, pb.policy_hash);
     }
 
     #[test]

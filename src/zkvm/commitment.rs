@@ -188,13 +188,37 @@ pub fn compute_public_inputs_sha256(
     oracle_tape: &OracleTape,
     output: &VmOutput,
 ) -> PublicInputs {
+    compute_public_inputs_sha256_with_policy_hash(
+        program_hash,
+        input_value,
+        oracle_tape,
+        output,
+        [0u8; 32],
+    )
+}
+
+/// As [`compute_public_inputs_sha256`], but with a caller-supplied
+/// `policy_hash`.
+///
+/// Takes the hash rather than an `OraclePolicy` because the zkVM guest is
+/// `no_std` and cannot construct one: `OraclePolicy` carries `serde_json`
+/// schemas. The guest instead receives the policy's `canonical_bytes` and
+/// SHA-256s them itself (see `GuestInput::replay_public_inputs`), which is
+/// exactly what `OraclePolicy::policy_hash` does on the host.
+pub fn compute_public_inputs_sha256_with_policy_hash(
+    program_hash: [u8; 32],
+    input_value: &LuaValue,
+    oracle_tape: &OracleTape,
+    output: &VmOutput,
+    policy_hash: [u8; 32],
+) -> PublicInputs {
     PublicInputs {
         program_hash,
         input_hash: hash_input(input_value),
         tool_responses_hash: oracle_tape.commitment_hash_sha256(),
         output_hash: hash_output(output),
         attestation_hash: oracle_tape.attestation_commitment_sha256(),
-        policy_hash: [0u8; 32],
+        policy_hash,
     }
 }
 

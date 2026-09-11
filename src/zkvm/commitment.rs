@@ -30,7 +30,14 @@ pub struct PublicInputs {
     /// SHA-256 of `canonical_serialize(input_value)`.
     pub input_hash: [u8; 32],
 
-    /// SHA-256 commitment over all oracle tape entries (from `OracleTape::commitment_hash()`).
+    /// Commitment over all oracle tape entries, in order.
+    ///
+    /// The primitive depends on the proving backend, and is chosen by which
+    /// constructor built this struct: Poseidon2 (`OracleTape::commitment_hash`)
+    /// for the Noir path via [`compute_public_inputs`], SHA-256
+    /// (`OracleTape::commitment_hash_sha256`) for zkVM backends via
+    /// [`compute_public_inputs_sha256`]. The two are not interchangeable — a
+    /// verifier must recompute with the same scheme the prover used.
     pub tool_responses_hash: [u8; 32],
 
     /// keccak256 of the canonical output payload `abi.encode(int256(return_value))`.
@@ -50,6 +57,10 @@ pub struct PublicInputs {
     /// (signed feeds, zkTLS); a downstream consumer that trusts the provider
     /// verifies them. With no attestations this is the canonical
     /// `Poseidon2::hash([], 0)` digest, NOT `[0u8; 32]`.
+    ///
+    /// Under [`compute_public_inputs_sha256`] this is the SHA-256 scheme's
+    /// equivalent (`OracleTape::attestation_commitment_sha256`), which is
+    /// likewise a real digest rather than zero when no attestations are present.
     pub attestation_hash: [u8; 32],
 
     /// SHA-256 of the canonical encoding of the `OraclePolicy` document.
@@ -120,6 +131,37 @@ pub fn compute_public_inputs(
         tool_responses_hash: oracle_tape.commitment_hash(),
         output_hash: hash_output(output),
         attestation_hash: oracle_tape.attestation_commitment(),
+        policy_hash: [0u8; 32],
+    }
+}
+
+/// Build `PublicInputs` using the SHA-256 commitment scheme, for zkVM backends.
+///
+/// Identical to [`compute_public_inputs`] in every field except the two tape
+/// commitments, which use SHA-256 rather than Poseidon2. `input_hash` is
+/// already SHA-256 and `output_hash` is already keccak256 (both fixed by their
+/// consumers), so only `tool_responses_hash` and `attestation_hash` differ.
+///
+/// Use this when proving with a RISC-V zkVM, where a software Poseidon2
+/// permutation absorbing 3 bytes costs orders of magnitude more guest cycles
+/// than an accelerated SHA-256 block. The resulting `PublicInputs` will NOT
+/// match one built by [`compute_public_inputs`] for the same execution; pick
+/// one scheme per verifier and stay on it.
+///
+/// `policy_hash` is `[0u8; 32]` (no-policy stub), matching
+/// [`compute_public_inputs`].
+pub fn compute_public_inputs_sha256(
+    program_hash: [u8; 32],
+    input_value: &LuaValue,
+    oracle_tape: &OracleTape,
+    output: &VmOutput,
+) -> PublicInputs {
+    PublicInputs {
+        program_hash,
+        input_hash: hash_input(input_value),
+        tool_responses_hash: oracle_tape.commitment_hash_sha256(),
+        output_hash: hash_output(output),
+        attestation_hash: oracle_tape.attestation_commitment_sha256(),
         policy_hash: [0u8; 32],
     }
 }
@@ -250,6 +292,71 @@ mod tests {
         // canonical empty Poseidon2 digest (matching the circuit at num_tool_calls == 0).
         assert_eq!(pi.attestation_hash, tape.attestation_commitment());
         assert_eq!(pi.policy_hash, [0u8; 32]);
+    }
+
+    fn attested_tape() -> OracleTape {
+        OracleTape {
+            entries: vec![crate::host::tape::TapeEntry::Ok(
+                b"{\"price\":100}".to_vec(),
+            )],
+            attestations: vec![b"sig".to_vec()],
+        }
+    }
+
+    #[test]
+    fn compute_public_inputs_sha256_fields() {
+        let tape = attested_tape();
+        let output = make_output(LuaValue::Integer(7));
+        let program_hash = [1u8; 32];
+        let input = LuaValue::Integer(42);
+
+        let pi = compute_public_inputs_sha256(program_hash, &input, &tape, &output);
+        assert_eq!(pi.program_hash, program_hash);
+        assert_eq!(pi.input_hash, hash_input(&input));
+        assert_eq!(pi.tool_responses_hash, tape.commitment_hash_sha256());
+        assert_eq!(pi.output_hash, hash_output(&output));
+        assert_eq!(pi.attestation_hash, tape.attestation_commitment_sha256());
+        assert_eq!(pi.policy_hash, [0u8; 32]);
+    }
+
+    /// The two backends commit the same execution, but only the tape hashes
+    /// change primitive. `input_hash` (SHA-256) and `output_hash` (keccak256)
+    /// are fixed by their consumers and must be identical across backends.
+    #[test]
+    fn sha256_and_poseidon_public_inputs_differ_only_in_tape_hashes() {
+        let tape = attested_tape();
+        let output = make_output(LuaValue::Integer(7));
+        let input = LuaValue::Integer(42);
+
+        let p = compute_public_inputs([1u8; 32], &input, &tape, &output);
+        let s = compute_public_inputs_sha256([1u8; 32], &input, &tape, &output);
+
+        assert_eq!(p.program_hash, s.program_hash);
+        assert_eq!(p.input_hash, s.input_hash);
+        assert_eq!(p.output_hash, s.output_hash);
+        assert_eq!(p.policy_hash, s.policy_hash);
+        assert_ne!(p.tool_responses_hash, s.tool_responses_hash);
+        assert_ne!(p.attestation_hash, s.attestation_hash);
+    }
+
+    /// Absence of attestations must still be a real commitment under SHA-256,
+    /// the same property the Poseidon2 path has.
+    #[test]
+    fn compute_public_inputs_sha256_empty_tape_hashes_are_nonzero() {
+        let tape = OracleTape::new();
+        let output = make_output(LuaValue::Nil);
+        let pi = compute_public_inputs_sha256([0u8; 32], &LuaValue::Nil, &tape, &output);
+        assert_ne!(pi.tool_responses_hash, [0u8; 32]);
+        assert_ne!(pi.attestation_hash, [0u8; 32]);
+    }
+
+    #[test]
+    fn compute_public_inputs_sha256_is_deterministic() {
+        let tape = attested_tape();
+        let output = make_output(LuaValue::Integer(7));
+        let a = compute_public_inputs_sha256([1u8; 32], &LuaValue::Integer(42), &tape, &output);
+        let b = compute_public_inputs_sha256([1u8; 32], &LuaValue::Integer(42), &tape, &output);
+        assert_eq!(a, b);
     }
 
     #[test]

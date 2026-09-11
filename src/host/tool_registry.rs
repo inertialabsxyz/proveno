@@ -268,6 +268,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_flows_from_host_to_transcript_and_binds_tape() {
         use crate::host::tape::OracleTape;

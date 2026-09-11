@@ -9,14 +9,12 @@
 //! same return value) without making any external calls, which makes it
 //! suitable for execution inside a zkVM guest.
 
+#[cfg(feature = "poseidon")]
+use crate::host::poseidon2::{
+    bytes_to_fields, field_to_be_bytes32, poseidon2_hash, u8_to_field, u32_to_field,
+};
 use crate::{
-    host::{
-        canonicalize::canonical_deserialize,
-        poseidon2::{
-            bytes_to_fields, field_to_be_bytes32, poseidon2_hash, u8_to_field, u32_to_field,
-        },
-        transcript::ToolCallRecord,
-    },
+    host::{canonicalize::canonical_deserialize, transcript::ToolCallRecord},
     types::{table::LuaTable, value::LuaValue},
     vm::engine::HostInterface,
 };
@@ -112,6 +110,7 @@ impl OracleTape {
     ///
     /// An empty tape commits to `Poseidon2([])` — a fixed sponge-IV-only
     /// digest derived from the zero-length domain separator.
+    #[cfg(feature = "poseidon")]
     pub fn commitment_hash(&self) -> [u8; 32] {
         let leaves: Vec<_> = self
             .entries
@@ -125,6 +124,7 @@ impl OracleTape {
     }
 
     /// Hex-encoded Poseidon2 commitment hash (64 lowercase hex chars).
+    #[cfg(feature = "poseidon")]
     pub fn commitment_hash_hex(&self) -> String {
         self.commitment_hash()
             .iter()
@@ -138,6 +138,7 @@ impl OracleTape {
     /// commitment. `attestation_commitment` reuses it so the provenance bind is
     /// provably over the *same* response bytes that `tool_responses_hash`
     /// commits to — the circuit computes this leaf once and feeds both hashes.
+    #[cfg(feature = "poseidon")]
     fn response_leaf(tag: u8, payload: &[u8]) -> crate::host::poseidon2::FieldElement {
         let mut inputs = Vec::with_capacity(2 + payload.len());
         inputs.push(u8_to_field(tag));
@@ -172,6 +173,7 @@ impl OracleTape {
     /// is well-defined whether or not provenance is present.
     ///
     /// An empty tape commits to `Poseidon2([])`, matching `commitment_hash`.
+    #[cfg(feature = "poseidon")]
     pub fn attestation_commitment(&self) -> [u8; 32] {
         let leaves: Vec<_> = self
             .entries
@@ -196,6 +198,7 @@ impl OracleTape {
     }
 
     /// Attestation leaf for one blob: `Poseidon2(att_len, att_bytes...)`.
+    #[cfg(feature = "poseidon")]
     fn att_leaf(attestation: &[u8]) -> crate::host::poseidon2::FieldElement {
         let mut inputs = Vec::with_capacity(1 + attestation.len());
         inputs.push(u32_to_field(attestation.len() as u32));
@@ -210,6 +213,7 @@ impl OracleTape {
     /// reproduce `attestation_commitment` *without* the raw attestation bytes
     /// in-circuit. Bind-only: the leaf is a pass-through commitment to the blob,
     /// which the circuit does not verify.
+    #[cfg(feature = "poseidon")]
     pub fn attestation_leaves_be(&self) -> Vec<[u8; 32]> {
         self.entries
             .iter()
@@ -485,6 +489,7 @@ mod tests {
 
     // ── OracleTape::commitment_hash ───────────────────────────────────────────
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_is_32_bytes() {
         let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
@@ -492,6 +497,7 @@ mod tests {
         assert_eq!(h.len(), 32);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_hex_is_64_hex_chars() {
         let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
@@ -500,6 +506,7 @@ mod tests {
         assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_empty_tape_is_deterministic() {
         let h1 = OracleTape::new().commitment_hash();
@@ -507,6 +514,7 @@ mod tests {
         assert_eq!(h1, h2);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_differs_for_different_entries() {
         let t1 = OracleTape::from_records(&[ok_record(0, b"{\"a\":1}")]);
@@ -514,6 +522,7 @@ mod tests {
         assert_ne!(t1.commitment_hash(), t2.commitment_hash());
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_ok_vs_err_differs() {
         let t_ok = OracleTape::from_records(&[ok_record(0, b"\"msg\"")]);
@@ -523,12 +532,14 @@ mod tests {
 
     // ── OracleTape::attestation_commitment (bind-only provenance) ─────────────
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_is_32_bytes() {
         let tape = OracleTape::from_records(&[ok_record_att(0, b"{}", b"sig")]);
         assert_eq!(tape.attestation_commitment().len(), 32);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_empty_tape_is_deterministic() {
         let h1 = OracleTape::new().attestation_commitment();
@@ -536,6 +547,7 @@ mod tests {
         assert_eq!(h1, h2);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_is_deterministic_for_same_tape() {
         // Replaying the same (response, attestation) pairs yields the identical
@@ -546,6 +558,7 @@ mod tests {
         assert_eq!(h1, h2);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_binds_to_response_bytes() {
         // Same attestation, tampered response → different commitment.
@@ -557,6 +570,7 @@ mod tests {
         assert_ne!(t1.attestation_commitment(), t2.attestation_commitment());
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_binds_to_attestation_bytes() {
         // Same response, different attestation → different commitment.
@@ -566,6 +580,7 @@ mod tests {
         assert_ne!(t1.attestation_commitment(), t2.attestation_commitment());
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_attested_differs_from_unattested() {
         let resp = b"{\"price\":100}";
@@ -577,6 +592,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_is_independent_of_tool_responses_hash() {
         // The provenance commitment is a separate slot — it must not perturb the
@@ -732,6 +748,7 @@ mod tests {
 
     /// The two schemes commit the same claim with different primitives; they
     /// must not be confused for one another at a call site.
+    #[cfg(feature = "poseidon")]
     #[test]
     fn sha256_and_poseidon_commitments_are_distinct() {
         let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);

@@ -25,8 +25,15 @@
 //! Rust↔circuit mismatch on the proof-relevant content. Bind those out-of-band
 //! (e.g. via a separate public input) if a future phase needs them.
 
+//! Only `TlsAttestationRecord` itself is unconditional. It is pure data and
+//! forms part of `DryRunResult`'s serialized shape, which must stay stable
+//! across host and guest builds; the cert-chain verification stack and the
+//! Poseidon2 commitment over it live behind the `tls` feature.
+
+#[cfg(feature = "tls")]
 pub mod verify;
 
+#[cfg(feature = "tls")]
 use crate::host::poseidon2::{field_to_be_bytes32, poseidon2_hash, u8_to_field};
 
 #[cfg(not(feature = "std"))]
@@ -97,6 +104,7 @@ impl TlsAttestationRecord {
 /// to the same content. Certs whose DER cannot be parsed as P-256 contribute
 /// nothing to the hash (matching the circuit's `if i < num_certs` predicate
 /// over zero-padded slots).
+#[cfg(feature = "tls")]
 pub fn compute_tls_attestation_hash(records: &[TlsAttestationRecord]) -> [u8; 32] {
     let mut fields = Vec::new();
     for record in records {
@@ -117,11 +125,12 @@ pub fn compute_tls_attestation_hash(records: &[TlsAttestationRecord]) -> [u8; 32
 /// The canonical "no attestation" hash: `Poseidon2::hash([], 0)` serialised to
 /// `[u8; 32]` big-endian. Use this in place of `[0u8; 32]` when asserting that
 /// no verified TLS attestation was captured.
+#[cfg(feature = "tls")]
 pub fn empty_tls_attestation_hash() -> [u8; 32] {
     field_to_be_bytes32(poseidon2_hash(&[]))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "tls"))]
 mod tests {
     use super::*;
 

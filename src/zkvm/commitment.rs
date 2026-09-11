@@ -119,6 +119,7 @@ pub fn hash_output(output: &VmOutput) -> [u8; 32] {
 /// `attestation_hash` is derived from the oracle tape: each recorded response
 /// is bound to the provenance attestation the host sourced for it (empty when
 /// none). See `OracleTape::attestation_commitment`.
+#[cfg(feature = "poseidon")]
 pub fn compute_public_inputs(
     program_hash: [u8; 32],
     input_value: &LuaValue,
@@ -170,6 +171,7 @@ pub fn compute_public_inputs_sha256(
 ///
 /// Use this variant when running under a real `OraclePolicy`. The hash is
 /// stable: same policy struct → same bytes on any machine.
+#[cfg(all(feature = "poseidon", feature = "std"))]
 pub fn compute_public_inputs_with_policy(
     program_hash: [u8; 32],
     input_value: &LuaValue,
@@ -276,6 +278,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn compute_public_inputs_fields() {
         let tape = OracleTape::new();
@@ -322,6 +325,7 @@ mod tests {
     /// The two backends commit the same execution, but only the tape hashes
     /// change primitive. `input_hash` (SHA-256) and `output_hash` (keccak256)
     /// are fixed by their consumers and must be identical across backends.
+    #[cfg(feature = "poseidon")]
     #[test]
     fn sha256_and_poseidon_public_inputs_differ_only_in_tape_hashes() {
         let tape = attested_tape();
@@ -359,6 +363,7 @@ mod tests {
         assert_eq!(a, b);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn compute_public_inputs_policy_hash_is_zero_without_policy() {
         let tape = OracleTape::new();
@@ -367,6 +372,7 @@ mod tests {
         assert_eq!(pi.policy_hash, [0u8; 32]);
     }
 
+    #[cfg(all(feature = "poseidon", feature = "std"))]
     #[test]
     fn compute_public_inputs_with_policy_nonzero_hash() {
         use crate::policy::profiles::constrained_http_v1;
@@ -381,6 +387,7 @@ mod tests {
         assert_eq!(pi.policy_hash, policy.policy_hash());
     }
 
+    #[cfg(all(feature = "poseidon", feature = "std"))]
     #[test]
     fn compute_public_inputs_with_policy_hash_stable() {
         use crate::policy::profiles::template_price_feed_v1;

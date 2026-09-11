@@ -1,7 +1,7 @@
-use crate::{
-    compiler::proto::CompiledProgram,
-    host::poseidon2::{field_to_be_bytes32, i64_to_field, poseidon2_hash, u8_to_field},
-};
+use crate::compiler::proto::CompiledProgram;
+#[cfg(feature = "poseidon")]
+use crate::host::poseidon2::{field_to_be_bytes32, i64_to_field, poseidon2_hash, u8_to_field};
+use sha2::{Digest, Sha256};
 
 use super::opcodes::{instruction_to_opcode_id, instruction_to_operand};
 
@@ -72,6 +72,7 @@ pub fn encode_program(program: &CompiledProgram) -> Result<NoirBytecode, EncodeE
 /// Callers feed it the same instruction stream the witness writer packs into
 /// `bytecode_opcodes` / `bytecode_operands` (the encoder builds that stream
 /// from `program.prototypes` in declaration order).
+#[cfg(feature = "poseidon")]
 pub fn compute_program_hash(prototypes: &[crate::compiler::proto::FunctionProto]) -> [u8; 32] {
     let count: usize = prototypes.iter().map(|p| p.code.len()).sum();
     let mut inputs = Vec::with_capacity(count * 2);
@@ -84,6 +85,37 @@ pub fn compute_program_hash(prototypes: &[crate::compiler::proto::FunctionProto]
     field_to_be_bytes32(poseidon2_hash(&inputs))
 }
 
+/// Compute the SHA-256 program hash over the same flat `(opcode, operand)`
+/// stream [`compute_program_hash`] uses, for zkVM proving backends.
+///
+/// ```text
+/// preimage = instr_count_be32 ‖ ( opcode_u8 ‖ operand_u64_be ) * instr_count
+/// ```
+///
+/// The operand is widened through its `u64` bit pattern exactly as
+/// `i64_to_field` does on the Poseidon2 path, so `-1i64` encodes as
+/// `0xffff_ffff_ffff_ffff` under both schemes. The instruction count is
+/// prefixed to supply the domain separation Poseidon2 gets from its sponge IV.
+///
+/// `program_hash` is backend-specific, exactly like `tool_responses_hash` and
+/// `attestation_hash`: a verifier must recompute it with the same scheme the
+/// prover used. See [`CompiledProgram::program_hash`] for which scheme a given
+/// build produces.
+pub fn compute_program_hash_sha256(
+    prototypes: &[crate::compiler::proto::FunctionProto],
+) -> [u8; 32] {
+    let count: usize = prototypes.iter().map(|p| p.code.len()).sum();
+    let mut h = Sha256::new();
+    h.update((count as u32).to_be_bytes());
+    for proto in prototypes {
+        for instr in &proto.code {
+            h.update([instruction_to_opcode_id(instr)]);
+            h.update((instruction_to_operand(instr) as u64).to_be_bytes());
+        }
+    }
+    h.finalize().into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +125,7 @@ mod tests {
         compile(&parse(src).unwrap()).unwrap()
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn program_hash_is_stable() {
         // Compile the same source twice (two independent `CompiledProgram`s)

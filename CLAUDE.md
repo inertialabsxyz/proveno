@@ -174,7 +174,10 @@ cargo run -p proveno-witness  -- compiled.json dry_result.json
 cargo run -p proveno-openvm-host -- compiled.json dry_result.json --prove [--stark]
 ```
 
-`make prove-openvm` runs the whole thing on `examples/simple.lua`.
+`make prove-openvm` runs the whole thing on `examples/simple.lua`;
+`make prove-examples` runs every `examples/*.lua` and reports which stage each
+one reaches. All 8 currently compile, dry-run, replay, prove and verify. Several
+make live HTTP calls, so that target needs network.
 
 ### Proof levels
 

@@ -303,3 +303,36 @@ circuit. `openvm_sha2::Sha256` is API-identical to `sha2::Sha256` (on host
 targets it *is* that type, re-exported), so a feature-selected type alias in
 proveno would move the commitment hashing onto the chip. Unmeasured, and the
 first thing to try.
+
+## 9. Every example proves
+
+`./prove-examples.sh` runs all of `examples/*.lua` through compile → dry run →
+replay → prove → verify, reporting the stage each reaches rather than pass/fail.
+App level, same machine.
+
+| program | instructions | prove | notes |
+|---|---:|---:|---|
+| `simple` | 127,363 | 7.1 s | |
+| `eth_price` | 229,104 | 8.2 s | live `http_get` |
+| `usdc_depeg` | 252,156 | 7.1 s | live `http_get` |
+| `prover` | 283,114 | 7.5 s | live `http_get` |
+| `window_max_breach` | 323,320 | 7.1 s | returns a table |
+| `tools` | 539,099 | 8.4 s | `echo`/`add`/`upper`/`fail` |
+| `prediction_market` | 877,770 | 11.2 s | live `http_get` + `time_now` |
+| `system` | 1,154,532 | 11.1 s | largest, no tool calls |
+
+8 of 8. Two things had to be fixed to get here:
+
+- `window_max_breach` returns a table, and the driver's pre-flight divergence
+  check compared `LuaValue`s. `LuaValue::Table` uses `Rc::ptr_eq` (correct Lua
+  identity semantics), so two structurally identical tables from separate runs
+  never compare equal and every table-returning program was rejected as
+  "diverged". The check now compares canonical bytes, which is also what the
+  commitments hash.
+- `tools` and `prediction_market` needed `echo`/`add`/`upper`/`time_now`, which
+  `ProverHost` did not implement. Added, matching the orchestrator's
+  `StubHost`/`LiveHost` response shapes so the examples run unchanged.
+
+`prediction_market` only calls `llm_query` in a tiebreaker branch taken when its
+two price sources disagree. That branch needs `ANTHROPIC_API_KEY` and is still
+unimplemented in `ProverHost`; the run above did not take it.

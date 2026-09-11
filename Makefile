@@ -1,4 +1,4 @@
-.PHONY: check lint test test-nostd test-prove build-openvm prove-openvm fix build dev act help
+.PHONY: check lint test test-nostd test-prove build-openvm prove-openvm prove-examples fix build dev act help
 
 help:
 	@echo "Usage: make <target>"
@@ -13,6 +13,7 @@ help:
 	@echo "  test-prove     Noir nargo+bb prove/verify pipeline (slow; pre-PR gate)"
 	@echo "  build-openvm   build + transpile the OpenVM guest (needs cargo-openvm)"
 	@echo "  prove-openvm   full OpenVM pipeline on examples/simple.lua: compile -> prove -> verify"
+	@echo "  prove-examples run every examples/*.lua through the OpenVM pipeline"
 	@echo "  fix            auto-format + apply safe clippy fixes"
 	@echo "  build          cargo build"
 
@@ -73,6 +74,12 @@ prove-openvm:
 	cargo run -q -p proveno-openvm-host -- \
 		target/openvm-demo.compiled.json target/openvm-demo.dry.json \
 		--out target/openvm-demo.input.json --prove
+
+# Run every examples/*.lua through compile -> dry run -> prove -> verify and
+# report which stage each one reaches. Makes live HTTP calls (several examples
+# fetch real price data), so it needs network. Not part of `make check`.
+prove-examples:
+	./prove-examples.sh
 
 # Noir prove/verify pipeline (nargo execute + bb write_vk/prove/verify).
 # Slow (~30 s); not part of `make test`. Required pre-PR gate when touching

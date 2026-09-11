@@ -179,6 +179,51 @@ cargo run -p proveno-openvm-host -- compiled.json dry_result.json --prove [--sta
 one reaches. All 8 currently compile, dry-run, replay, prove and verify. Several
 make live HTTP calls, so that target needs network.
 
+### Execution policy
+
+An `OraclePolicy` constrains what an execution may do (domain allowlist, HTTP
+method restriction, tool-call and payload limits, response schemas). Supply one
+as a built-in profile name or a JSON file:
+
+```bash
+./prove-openvm.sh myscript.lua --policy policies/test-policy.json
+cargo run -p proveno-witness -- compiled.json dry.json --policy constrained_http_v1
+```
+
+`--policy` goes to **both** the dry run, which enforces it, and the guest input,
+which commits its hash. `prove-openvm.sh` passes it to both so they cannot
+drift; the two CLIs must be given the same value by hand.
+
+Omitted list fields mean *unrestricted*, not *denied*, so a sparse policy file is
+wider than a full one.
+
+**Bind, not verify.** The guest receives the policy's `canonical_bytes` and
+SHA-256s them itself, so `policy_hash` provably corresponds to that document and
+a prover cannot assert an unrelated hash. It does **not** attest compliance: the
+policy is enforced host-side during the dry run via `ToolRegistry::with_policy`,
+and the guest does not re-check it. Same boundary as `attestation_hash`.
+Enforcing the policy inside the guest would need a `no_std` subset of the policy
+module and is follow-on work.
+
+### LLM-driven tasks
+
+The orchestrator generates a Lua program from a natural-language task, runs it,
+and can prove the result with either backend:
+
+```bash
+cargo run -p proveno-orchestrator -- "<task>" \
+    --policy policies/test-policy.json \
+    --prove --backend openvm --openvm-level app
+```
+
+`--backend` is `noir` (default) or `openvm`; `--openvm-level` is `app` or
+`stark`. A policy violation surfaces as a runtime error inside the retry loop,
+so the LLM gets a chance to regenerate a compliant program.
+
+Needs `ANTHROPIC_API_KEY`. Note that an exported-but-empty `ANTHROPIC_API_KEY`
+shadows the value in `.env`, because dotenv does not override variables already
+set; the orchestrator detects this and says so rather than failing with a 401.
+
 ### Proof levels
 
 | level | what it is |

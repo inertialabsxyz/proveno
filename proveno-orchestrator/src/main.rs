@@ -65,6 +65,20 @@ struct Cli {
     #[arg(long)]
     prove: bool,
 
+    /// Enforce an OraclePolicy during execution and commit its hash.
+    /// Either a built-in profile name (constrained_http_v1,
+    /// template_price_feed_v1) or a path to a JSON policy file.
+    #[arg(long)]
+    policy: Option<String>,
+
+    /// Proving backend for --prove: "noir" or "openvm"
+    #[arg(long, default_value = "noir")]
+    backend: String,
+
+    /// OpenVM proof level for --backend=openvm: "app" or "stark"
+    #[arg(long, default_value = "app")]
+    openvm_level: String,
+
     /// Output directory for proof artifacts (used with --prove)
     #[arg(long, default_value = "proof-output")]
     prove_output: String,
@@ -80,10 +94,42 @@ fn main() {
     // Load .env file if present (silently ignore if missing)
     let _ = dotenvy::dotenv();
 
+    // Resolve the policy once. The same document has to be enforced during
+    // execution and committed in `policy_hash`; loading it twice from different
+    // places is how those drift apart.
+    let policy = match cli.policy {
+        Some(ref spec) => match proveno::policy::OraclePolicy::load_spec(spec) {
+            Ok(p) => {
+                let hash: String = p.policy_hash().iter().map(|b| format!("{b:02x}")).collect();
+                eprintln!("policy: {spec}");
+                eprintln!("        hash={hash}");
+                Some(p)
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
+
     let (backend, model) = match cli.provider.as_str() {
         "anthropic" => {
+            // An empty-but-set variable is treated as missing rather than sent
+            // as an empty header. `dotenvy::dotenv()` does not override
+            // variables already present in the environment, so an exported
+            // `ANTHROPIC_API_KEY=` silently shadows a perfectly good key in
+            // `.env` and the only symptom is a 401 from the API.
             let api_key = match std::env::var("ANTHROPIC_API_KEY") {
-                Ok(key) => key,
+                Ok(key) if !key.trim().is_empty() => key,
+                Ok(_) => {
+                    eprintln!(
+                        "error: ANTHROPIC_API_KEY is set but empty, which shadows the value \
+                         in .env (dotenv does not override variables already set).\n       \
+                         Run `unset ANTHROPIC_API_KEY` or export a real key."
+                    );
+                    std::process::exit(1);
+                }
                 Err(_) => {
                     eprintln!("error: ANTHROPIC_API_KEY environment variable not set");
                     std::process::exit(1);
@@ -239,7 +285,19 @@ fn main() {
 
         // Execute
         let host = tools::LiveHost::new(client.clone());
-        let output = match pipeline::execute(&program, LuaValue::Nil, config.clone(), host) {
+        let run = match policy {
+            // Enforced during the run, so a violation reaches the retry loop as
+            // a runtime error and the LLM gets a chance to regenerate.
+            Some(ref p) => pipeline::execute_with_policy(
+                &program,
+                LuaValue::Nil,
+                config.clone(),
+                host,
+                p.clone(),
+            ),
+            None => pipeline::execute(&program, LuaValue::Nil, config.clone(), host),
+        };
+        let output = match run {
             Ok(o) => o,
             Err(e) => {
                 eprintln!("[attempt {attempt}] {e}");
@@ -262,15 +320,29 @@ fn main() {
 
         // Success
         let prove_artifacts = if cli.prove {
-            let circuit_dir = std::path::PathBuf::from(&cli.circuit_dir);
-            let artifacts = prove::build_proof_artifacts_with_noir(
-                &program,
-                &LuaValue::Nil,
-                output.clone(),
-                vec![],
-                &cli.prove_output,
-                &circuit_dir,
-            );
+            let artifacts = match cli.backend.as_str() {
+                "openvm" => prove::build_proof_artifacts_with_openvm(
+                    &program,
+                    &LuaValue::Nil,
+                    output.clone(),
+                    vec![],
+                    &cli.prove_output,
+                    &cli.openvm_level,
+                    cli.policy.as_deref(),
+                ),
+                "noir" => prove::build_proof_artifacts_with_noir(
+                    &program,
+                    &LuaValue::Nil,
+                    output.clone(),
+                    vec![],
+                    &cli.prove_output,
+                    &std::path::PathBuf::from(&cli.circuit_dir),
+                ),
+                other => {
+                    eprintln!("error: unknown --backend '{other}' (expected: noir, openvm)");
+                    std::process::exit(1);
+                }
+            };
             match artifacts {
                 Ok(a) => Some(a),
                 Err(e) => {

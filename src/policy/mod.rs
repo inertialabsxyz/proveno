@@ -417,6 +417,94 @@ mod tests {
         assert_ne!(a.policy_hash(), b.policy_hash());
     }
 
+    // ── canonical_bytes ↔ PolicyView::parse agreement ────────────────────────
+
+    /// The load-bearing invariant behind guest-side enforcement: the guest
+    /// derives *both* `policy_hash` and the rules it enforces from this one
+    /// buffer, so `PolicyView::parse` must read back exactly what
+    /// `canonical_bytes` wrote. A field added, reordered or resized on one side
+    /// only would silently make the guest enforce a different policy from the
+    /// one it commits.
+    #[test]
+    fn canonical_bytes_round_trip_through_policy_view() {
+        let mut p = minimal_policy();
+        p.allowed_domains = vec!["b.example".into(), "a.example".into()];
+        p.allowed_http_methods = vec!["http_post".into(), "http_get".into()];
+        p.max_tool_calls = 7;
+        p.max_payload_bytes_per_call = 4096;
+        p.tls_requirement = TlsRequirement::RequiredAttested;
+        p.required_output_schema = Some(serde_json::json!({"ok": true}));
+        p.schema_versions
+            .insert("a.example".into(), serde_json::json!({"price": 0}));
+        p.schema_versions
+            .insert("b.example".into(), serde_json::json!({"qty": 0}));
+
+        let bytes = p.canonical_bytes();
+        let view = PolicyView::parse(&bytes).expect("canonical bytes must parse");
+
+        // Sorted, because that is the order canonical_bytes emits.
+        assert_eq!(view.allowed_domains, vec!["a.example", "b.example"]);
+        assert_eq!(view.allowed_http_methods, vec!["http_get", "http_post"]);
+        assert_eq!(view.max_tool_calls, 7);
+        assert_eq!(view.max_payload_bytes_per_call, 4096);
+        assert_eq!(view.tls_requirement, TlsRequirement::RequiredAttested);
+    }
+
+    /// Host and guest must reach the same verdict on the same call, or a run
+    /// the dry run permitted becomes unprovable (or, worse, the reverse).
+    #[test]
+    fn policy_view_and_oracle_policy_agree_on_http_calls() {
+        let mut p = minimal_policy();
+        p.allowed_domains = vec!["api.example.com".into()];
+        p.allowed_http_methods = vec!["http_get".into()];
+        let bytes = p.canonical_bytes();
+        let view = PolicyView::parse(&bytes).unwrap();
+
+        for (tool, url) in [
+            ("http_get", "https://api.example.com/v1"),
+            ("http_get", "https://evil.example/steal"),
+            ("http_post", "https://api.example.com/v1"),
+            ("http_get", "api.example.com:8443/v1"),
+            ("http_get", ""),
+        ] {
+            assert_eq!(
+                p.check_http_call(tool, url).is_ok(),
+                view.check_http_call(tool, url).is_ok(),
+                "host and guest disagree on {tool} {url}"
+            );
+        }
+    }
+
+    /// A tls_requirement byte outside 0..=2 is refused rather than defaulted,
+    /// and every truncation of a valid buffer is refused rather than partially
+    /// applied — a partially applied policy is indistinguishable from a weaker
+    /// one.
+    #[test]
+    fn policy_view_refuses_corrupt_bytes_rather_than_weakening() {
+        let mut p = minimal_policy();
+        p.allowed_domains = vec!["api.example.com".into()];
+        let bytes = p.canonical_bytes();
+        assert!(PolicyView::parse(&bytes).is_ok());
+
+        for cut in 0..bytes.len() {
+            assert!(
+                PolicyView::parse(&bytes[..cut]).is_err(),
+                "truncation to {cut} bytes was accepted"
+            );
+        }
+
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        assert!(PolicyView::parse(&trailing).is_err());
+
+        // Offset of the tls_requirement byte: the two string lists, then the
+        // two u64 limits.
+        let tls_at = bytes.len() - 1 - 4 - 4;
+        let mut bad_tls = bytes.clone();
+        bad_tls[tls_at] = 3;
+        assert!(PolicyView::parse(&bad_tls).is_err());
+    }
+
     #[test]
     fn policy_hash_is_32_bytes() {
         let h = minimal_policy().policy_hash();

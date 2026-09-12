@@ -59,8 +59,41 @@ There is no separate lint command; `cargo test` exercises the full suite includi
 | `proveno-orchestrator` | LLM-driven agent loop (Claude API + live tool execution; `--prove` runs the full Noir pipeline) |
 | `proveno-noir` | Noir witness writer + `nargo`/`bb` prover driver (canonical proving path) |
 | `proveno-verifier` | Small helper binaries (e.g. `policy-hash` prints the canonical policy commitment) |
+| `proveno-openvm` | OpenVM zkVM guest (RISC-V): replays a program and reveals the public-inputs digest |
+| `proveno-openvm-host` | Host driver for the OpenVM backend: builds guest input, drives prove/verify |
 
-Core library features: `default = ["std"]`, optional `serde`, optional `zkvm`. The `zkvm` feature exposes `PublicInputs` / commitment helpers used by the Noir proving path.
+Core library features: `default = ["std", "poseidon", "tls"]`, optional `serde`, optional `zkvm`.
+
+| Feature | Role |
+|---|---|
+| `std` | Standard library. Off = `no_std` + `alloc`. Also gates `policy` (needs `serde_json`) |
+| `poseidon` | BN254 Poseidon2 commitments, byte-identical to the Noir circuit |
+| `tls` | TLS attestation producer (cert-chain verification). Implies `poseidon` |
+| `zkvm` | `PublicInputs` and the commitment helpers |
+
+**`poseidon` must be off for zkVM guest builds.** It pulls `bn254_blackbox_solver`
+→ wasmer → cranelift → target-lexicon 0.12, whose build script hard-panics on
+custom RISC-V target triples, and cargo runs that build script whether or not
+the code is ever linked. Without it the dependency tree drops from 523 entries
+to 22.
+
+### Two commitment schemes
+
+`program_hash`, `tool_responses_hash`, and `attestation_hash` are
+**backend-specific**. `input_hash` (SHA-256) and `output_hash` (keccak256) are
+not — they are fixed by their consumers.
+
+| Backend | Scheme | Constructor |
+|---|---|---|
+| Noir / UltraHonk | Poseidon2 | `compute_public_inputs` |
+| zkVM (OpenVM) | SHA-256 | `compute_public_inputs_sha256` |
+
+Poseidon2 is right inside a circuit, where BN254 is native and SHA-256 costs
+~25k constraints per block. In a RISC-V zkVM the cost model inverts: one
+Poseidon2 permutation is 488 software 254-bit modmuls absorbing 3 bytes (rate 3,
+byte-per-field), against one accelerated instruction per 64-byte block for
+SHA-256. The two are **not interchangeable** — a verifier must recompute with
+the scheme the prover used.
 
 ## Resource limits (defaults)
 
@@ -118,6 +151,138 @@ Public inputs (8, in circuit-declaration order): `num_steps`, `program_hash`,
 `attestation_hash`, `policy_hash`. The Solidity `PublicInputs` struct in
 `contracts/src/Types.sol` mirrors this ordering exactly; reordering breaks
 verification.
+
+## OpenVM proving pipeline
+
+An alternative backend to the Noir path, committing with SHA-256 instead of
+Poseidon2. Requires `cargo-openvm`; proving keys are generated on first use and
+cached in `openvm/` (gitignored).
+
+```bash
+./prove-openvm.sh myscript.lua            # app STARK
+./prove-openvm.sh myscript.lua --stark    # aggregated (recursive) STARK
+```
+
+That is compile → dry run → guest input → prove → verify in one command, leaving
+every artifact under `target/openvm/<name>.*`. The individual steps, if you need
+them:
+
+```bash
+cargo openvm keygen --app-only        # app level; drop the flag for --stark
+cargo run -p proveno-compiler -- source.lua compiled.json
+cargo run -p proveno-witness  -- compiled.json dry_result.json
+cargo run -p proveno-openvm-host -- compiled.json dry_result.json --prove [--stark]
+```
+
+`make prove-openvm` runs the whole thing on `examples/simple.lua`;
+`make prove-examples` runs every `examples/*.lua` and reports which stage each
+one reaches. All 8 currently compile, dry-run, replay, prove and verify. Several
+make live HTTP calls, so that target needs network.
+
+### Execution policy
+
+An `OraclePolicy` constrains what an execution may do (domain allowlist, HTTP
+method restriction, tool-call and payload limits, response schemas). Supply one
+as a built-in profile name or a JSON file:
+
+```bash
+./prove-openvm.sh myscript.lua --policy policies/test-policy.json
+cargo run -p proveno-witness -- compiled.json dry.json --policy constrained_http_v1
+```
+
+`--policy` goes to **both** the dry run, which enforces it, and the guest input,
+which commits its hash. `prove-openvm.sh` passes it to both so they cannot
+drift; the two CLIs must be given the same value by hand.
+
+Omitted list fields mean *unrestricted*, not *denied*, so a sparse policy file is
+wider than a full one.
+
+**What the proof attests.** The guest receives the policy's `canonical_bytes`,
+SHA-256s them itself for `policy_hash`, and **enforces them during replay**. A
+run that violates the policy cannot be replayed, so no proof of it exists. This
+holds even if the host skipped enforcement during the dry run: attaching the
+policy at proving time re-checks the program's own tool calls, because the
+program computes its arguments inside the guest.
+
+| Check | Where |
+|---|---|
+| HTTP method restriction | in-guest, proven |
+| Domain allowlist | in-guest, proven |
+| `max_tool_calls` | in-guest, proven (rejected calls count, so probing is not free) |
+| `max_payload_bytes_per_call` | in-guest, checked against the tape before replay |
+| `required_output_schema`, `schema_versions` | **host-side only**, bind-only |
+
+JSON schema validation stays on the host because it needs `serde_json`. That
+part remains a `policy_hash` commitment with no in-proof enforcement, the same
+boundary as `attestation_hash`.
+
+The guest parses the enforceable fields out of the same bytes it hashes
+(`policy::canonical::PolicyView`), so the policy enforced and the policy
+committed are one document by construction. Corrupt bytes are refused outright
+rather than partially applied, since a partially applied policy is
+indistinguishable from a weaker one.
+
+What a proof still cannot tell you is whether a response genuinely came from the
+domain the program requested. That is provenance, delegated to an attestation
+provider.
+
+### LLM-driven tasks
+
+The orchestrator generates a Lua program from a natural-language task, runs it,
+and can prove the result with either backend:
+
+```bash
+cargo run -p proveno-orchestrator -- "<task>" \
+    --policy policies/test-policy.json \
+    --prove --backend openvm --openvm-level app
+```
+
+`--backend` is `noir` (default) or `openvm`; `--openvm-level` is `app` or
+`stark`. A policy violation surfaces as a runtime error inside the retry loop,
+so the LLM gets a chance to regenerate a compliant program.
+
+Needs `ANTHROPIC_API_KEY`. Note that an exported-but-empty `ANTHROPIC_API_KEY`
+shadows the value in `.env`, because dotenv does not override variables already
+set; the orchestrator detects this and says so rather than failing with a 401.
+
+### Proof levels
+
+| level | what it is |
+|---|---|
+| `app` | the application STARK (default) |
+| `stark` | app segments aggregated recursively into one root STARK (`--stark`) |
+| `evm` | Halo2 SNARK wrapper for on-chain verification (not wired up) |
+
+Baseline timings and scaling fits are in `examples/bench/RESULTS.md`.
+
+The guest reads a `GuestInput`, replays the program against a `TapeHost`, and
+reveals a single 32-byte digest over the six public inputs
+(`PublicInputs::digest_sha256`) rather than all 192 bytes: OpenVM's default
+public-values budget is 32 bytes and each public value costs proving work. The
+verifier gets the six values out of band and recomputes the digest.
+
+Host and guest share one definition of the proven computation,
+`GuestInput::replay_public_inputs`. The driver runs it before proving, so a
+host/guest divergence surfaces as an error rather than as a proof revealing an
+unexpected digest.
+
+**What the proof does not bind:** `VmConfig`. The prover chooses the gas and
+memory limits, which determine whether execution completes or aborts.
+
+### Known gap: the Poseidon2 program hash does not cover constants
+
+`compute_program_hash` (the Noir path) hashes only the `(opcode, operand)`
+instruction stream. `PushK`, `GetField` and `SetField` carry a constant-pool
+*index*, so `return 1`, `return 2` and `return "omega"` all compile to the same
+stream and hash identically. A prover can swap every literal in a program and
+still match a committed `program_hash`.
+
+`compute_program_hash_sha256` (the OpenVM path) does not have this gap: it
+covers the constant pool, upvalue descriptors and prototype metadata. Closing it
+on the Noir side means changing `assert_bytecode` in `noir/src/main.nr` in
+lockstep, which invalidates existing verification keys. Pinned by
+`poseidon_program_hash_does_not_cover_constants_known_gap` in
+`src/noir/encoder.rs`, which fails once the gap is closed.
 
 ## Architecture
 

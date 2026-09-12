@@ -425,22 +425,26 @@ fn test_program_hash_stable() {
 #[test]
 fn test_program_hash_differs_on_bytecode_change() {
     // Two programs that compile to structurally different instruction sequences
-    // produce different program hashes. The hash is Poseidon2 over (opcode,
-    // operand) pairs (see `crate::noir::encoder::compute_program_hash`), so any
-    // change in the instruction stream — different opcodes, different operands,
-    // different prototype count — flips the hash.
+    // produce different program hashes. Under either scheme the hash covers the
+    // (opcode, operand) stream, so any change to it — different opcodes,
+    // different operands, different prototype count — flips the hash.
     let prog1 = compile_src!("local x = 1 + 2");
     let prog2 = compile_src!("local x = 0; for i = 1, 10 do x = x + i end");
     assert_ne!(prog1.program_hash, prog2.program_hash);
 }
 
+#[cfg(feature = "poseidon")]
 #[test]
 fn test_program_hash_does_not_distinguish_constants_only() {
-    // KNOWN LIMITATION (intentional, documented here so it cannot regress
-    // silently): the program hash commits to the bytecode opcodes + operands
-    // the Noir circuit witnesses, and the circuit does not witness the
-    // constants table. Two programs that differ only in constant values
-    // therefore collide under the program hash.
+    // KNOWN LIMITATION of the Poseidon2 scheme (intentional, documented here so
+    // it cannot regress silently): the program hash commits to the bytecode
+    // opcodes + operands the Noir circuit witnesses, and the circuit does not
+    // witness the constants table. Two programs that differ only in constant
+    // values therefore collide under the program hash.
+    //
+    // The SHA-256 scheme used by zkVM backends does NOT have this limitation —
+    // see `test_sha256_program_hash_distinguishes_constants_only` below, and
+    // `compute_program_hash_sha256`, which covers the constant pool.
     //
     // `local x = 42` and `local x = 43` both compile to
     //     PushK(0); StoreLocal(0); Ret(0)
@@ -452,6 +456,17 @@ fn test_program_hash_does_not_distinguish_constants_only() {
     let prog1 = compile_src!("local x = 42");
     let prog2 = compile_src!("local x = 43");
     assert_eq!(prog1.program_hash, prog2.program_hash);
+}
+
+#[cfg(not(feature = "poseidon"))]
+#[test]
+fn test_sha256_program_hash_distinguishes_constants_only() {
+    // Without `poseidon`, `CompiledProgram::program_hash` is the SHA-256 hash
+    // used by zkVM backends, which covers the constant pool as well as the
+    // instruction stream. The constants-only collision above does not apply.
+    let prog1 = compile_src!("local x = 42");
+    let prog2 = compile_src!("local x = 43");
+    assert_ne!(prog1.program_hash, prog2.program_hash);
 }
 
 // ---------------------------------------------------------------------------

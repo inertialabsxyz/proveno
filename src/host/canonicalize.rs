@@ -14,15 +14,7 @@ use crate::{
     vm::gas::VmError,
 };
 #[cfg(not(feature = "std"))]
-use alloc::{
-    format,
-    rc::Rc,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
-#[cfg(not(feature = "std"))]
-use core::cell::RefCell;
+use alloc::{format, string::ToString, vec, vec::Vec};
 
 const MAX_TABLE_DEPTH: usize = 32;
 const MAX_STRING_LEN: usize = 1024 * 1024; // 1 MB
@@ -203,7 +195,8 @@ fn deser_string(s: &[u8]) -> Result<(Vec<u8>, &[u8]), CanonError> {
 /// Parse a JSON array (starting after the opening `[`).
 fn deser_array(s: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
     use crate::types::table::{LuaKey, LuaTable};
-    use std::{cell::RefCell, rc::Rc};
+    use alloc::rc::Rc;
+    use core::cell::RefCell;
 
     let mut t = LuaTable::new();
     let s = trim_leading_whitespace(s);
@@ -233,7 +226,8 @@ fn deser_array(s: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
 fn deser_object(s: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
     use crate::types::table::{LuaKey, LuaTable};
     use crate::types::value::LuaString;
-    use std::{cell::RefCell, rc::Rc};
+    use alloc::rc::Rc;
+    use core::cell::RefCell;
 
     let mut t = LuaTable::new();
     let s = trim_leading_whitespace(s);
@@ -422,7 +416,8 @@ mod tests {
         table::{LuaKey, LuaTable},
         value::{BuiltinId, LuaClosure, LuaString, LuaValue},
     };
-    use std::{cell::RefCell, rc::Rc};
+    use alloc::rc::Rc;
+    use core::cell::RefCell;
 
     fn int(n: i64) -> LuaValue {
         LuaValue::Integer(n)

@@ -120,6 +120,22 @@ pub enum UpvalueDesc {
 pub struct CompiledProgram {
     /// Index 0 is always the top-level chunk (implicit function with 0 params).
     pub prototypes: Vec<FunctionProto>,
-    /// SHA-256 of the canonical encoding of all prototypes.
+    /// Hash identifying the compiled program. Backend-specific, like the oracle
+    /// tape commitments — and the two backends do not cover the same data:
+    ///
+    /// - Under the `poseidon` feature: Poseidon2 over the flat
+    ///   `(opcode, operand)` instruction stream of all prototypes in
+    ///   declaration order, matching `assert_bytecode` in `noir/src/main.nr`.
+    ///   The constant pool is bound separately by the circuit.
+    /// - Otherwise (zkVM backends, where a software Poseidon2 permutation costs
+    ///   orders of magnitude more than an accelerated SHA-256 block): SHA-256
+    ///   over the **whole program** — prototype metadata, upvalue descriptors
+    ///   and the constant pool as well as the instruction stream. The wider
+    ///   coverage is load-bearing, not incidental: `PushK`/`GetField`/`SetField`
+    ///   carry constant-pool *indices*, so the instruction stream alone cannot
+    ///   tell `return 1` from `return "omega"`.
+    ///
+    /// See `crate::noir::encoder::compute_program_hash` and
+    /// `compute_program_hash_sha256` for the two definitions.
     pub program_hash: [u8; 32],
 }

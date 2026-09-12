@@ -24,6 +24,19 @@ header; the fields are concatenated directly.
 | 6 | `required_output_schema` | length-prefixed canonical JSON (see §Schema) |
 | 7 | `schema_versions` | sorted domain→schema map (see §Schema map) |
 
+This encoding has **two** consumers, not one. `OraclePolicy::canonical_bytes()`
+in `src/policy/mod.rs` writes it; `PolicyView::parse` in
+`src/policy/canonical.rs` reads it back inside the zkVM guest, which enforces
+fields 1–4 during replay against the same buffer it SHA-256s for `policy_hash`.
+Changing the field order, widths or framing therefore requires changing both, or
+the policy the guest enforces silently stops being the policy it commits.
+Fields 6 and 7 are walked for length only and never interpreted by the guest;
+schema validation stays host-side.
+
+`PolicyView::parse` is strict: it requires the whole buffer to be consumed and
+refuses anything malformed outright, because a partially applied policy is
+indistinguishable from a weaker one.
+
 ### String list encoding
 
 A list of UTF-8 strings is encoded as:

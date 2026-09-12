@@ -1,12 +1,7 @@
 //! Tool call transcript — typed records of every tool call made during execution.
 
 #[cfg(not(feature = "std"))]
-use alloc::{
-    borrow::ToOwned,
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{borrow::ToOwned, format, string::String, vec::Vec};
 use sha2::{Digest, Sha256};
 
 /// Status of a tool call.

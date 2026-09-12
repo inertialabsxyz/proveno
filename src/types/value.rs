@@ -1,5 +1,11 @@
 use crate::types::table::{LuaKey, LuaTable};
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use alloc::{
+    rc::Rc,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use core::cell::RefCell;
 pub const MAX_TABLE_ENTRIES: usize = 50_000;
 
 #[derive(Debug)]
@@ -511,7 +517,7 @@ mod tests {
 
     #[test]
     fn cmp_integers() {
-        use std::cmp::Ordering;
+        use core::cmp::Ordering;
         assert_eq!(int(1).lua_cmp(&int(2)).unwrap(), Ordering::Less);
         assert_eq!(int(2).lua_cmp(&int(2)).unwrap(), Ordering::Equal);
         assert_eq!(int(3).lua_cmp(&int(2)).unwrap(), Ordering::Greater);
@@ -519,7 +525,7 @@ mod tests {
 
     #[test]
     fn cmp_strings_lexicographic() {
-        use std::cmp::Ordering;
+        use core::cmp::Ordering;
         assert_eq!(s("abc").lua_cmp(&s("abd")).unwrap(), Ordering::Less);
         assert_eq!(s("abc").lua_cmp(&s("abc")).unwrap(), Ordering::Equal);
         assert_eq!(s("b").lua_cmp(&s("a")).unwrap(), Ordering::Greater);

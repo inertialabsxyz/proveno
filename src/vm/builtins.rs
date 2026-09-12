@@ -3,7 +3,14 @@
 //! All builtins are dispatched through [`call_builtin`]. Gas and memory are
 //! metered via the passed-in [`GasMeter`] and [`MemoryMeter`].
 
-use std::{cell::RefCell, rc::Rc};
+use alloc::{
+    format,
+    rc::Rc,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use core::cell::RefCell;
 
 use crate::{
     types::{

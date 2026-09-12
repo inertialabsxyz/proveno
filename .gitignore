@@ -3,3 +3,9 @@
 *.bin
 !contracts/test/fixtures/*.bin
 contracts/broadcast/
+
+# Transpiled OpenVM guest artifacts (cargo openvm build output)
+/openvm
+
+# OpenVM app proofs (build output of `make prove-openvm`)
+*.app.proof

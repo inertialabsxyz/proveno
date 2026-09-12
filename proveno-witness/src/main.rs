@@ -10,15 +10,6 @@ use crate::{host::ProverHost, prover::Prover};
 mod host;
 mod prover;
 
-fn parse_policy(name: &str) -> Option<OraclePolicy> {
-    use proveno::policy::profiles::{constrained_http_v1, template_price_feed_v1};
-    match name {
-        "constrained_http_v1" => Some(constrained_http_v1()),
-        "template_price_feed_v1" => Some(template_price_feed_v1()),
-        _ => None,
-    }
-}
-
 fn main() {
     let mut args = env::args().skip(1);
 
@@ -29,7 +20,8 @@ fn main() {
         }),
         None => {
             eprintln!(
-                "Usage: proveno-witness <compiled.json> [output.json] [--policy constrained_http_v1|template_price_feed_v1]"
+                "Usage: proveno-witness <compiled.json> [output.json] [--policy <profile|file.json>]\n\
+         profiles: constrained_http_v1, template_price_feed_v1"
             );
             return;
         }
@@ -59,22 +51,53 @@ fn main() {
 
     let result = match policy_name.as_deref() {
         Some(name) => {
-            let policy = parse_policy(name).unwrap_or_else(|| {
-                eprintln!(
-                    "unknown policy '{name}'; valid: constrained_http_v1, template_price_feed_v1"
-                );
+            let policy = OraclePolicy::load_spec(name).unwrap_or_else(|e| {
+                eprintln!("error: {e}");
                 std::process::exit(1);
             });
-            prover
-                .dry_run_with_policy(&program.into(), LuaValue::Nil, vec![], &policy)
-                .unwrap()
+            eprintln!(
+                "policy: {name}  hash={}",
+                policy
+                    .policy_hash()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            );
+            prover.dry_run_with_policy(&program.into(), LuaValue::Nil, vec![], &policy)
         }
-        None => prover
-            .dry_run(&program.into(), LuaValue::Nil, vec![])
-            .unwrap(),
+        None => prover.dry_run(&program.into(), LuaValue::Nil, vec![]),
     };
 
-    let f = File::create(&out_path).unwrap();
-    serde_json::to_writer(f, &result).unwrap();
+    // A policy violation is an expected outcome, not a bug, so report it rather
+    // than panicking with a Debug-formatted VmError.
+    let result = match result {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: dry run failed: {}", format_vm_error(&e));
+            std::process::exit(1);
+        }
+    };
+
+    let f = File::create(&out_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot create {out_path}: {e}");
+        std::process::exit(1);
+    });
+    serde_json::to_writer(f, &result).unwrap_or_else(|e| {
+        eprintln!("error: cannot write {out_path}: {e}");
+        std::process::exit(1);
+    });
     println!("File written - {}", out_path);
+}
+
+/// Unwrap the `WithLine` wrapper so a policy rejection reads as the reason it
+/// happened rather than as a nested Debug dump.
+fn format_vm_error(e: &proveno::VmError) -> String {
+    use proveno::VmError;
+    match e {
+        VmError::WithLine(line, inner) => format!("line {line}: {}", format_vm_error(inner)),
+        VmError::RuntimeError(LuaValue::String(s)) => {
+            String::from_utf8_lossy(s.as_bytes()).into_owned()
+        }
+        other => format!("{other:?}"),
+    }
 }

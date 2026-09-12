@@ -30,7 +30,14 @@ pub struct PublicInputs {
     /// SHA-256 of `canonical_serialize(input_value)`.
     pub input_hash: [u8; 32],
 
-    /// SHA-256 commitment over all oracle tape entries (from `OracleTape::commitment_hash()`).
+    /// Commitment over all oracle tape entries, in order.
+    ///
+    /// The primitive depends on the proving backend, and is chosen by which
+    /// constructor built this struct: Poseidon2 (`OracleTape::commitment_hash`)
+    /// for the Noir path via [`compute_public_inputs`], SHA-256
+    /// (`OracleTape::commitment_hash_sha256`) for zkVM backends via
+    /// [`compute_public_inputs_sha256`]. The two are not interchangeable — a
+    /// verifier must recompute with the same scheme the prover used.
     pub tool_responses_hash: [u8; 32],
 
     /// keccak256 of the canonical output payload `abi.encode(int256(return_value))`.
@@ -50,11 +57,46 @@ pub struct PublicInputs {
     /// (signed feeds, zkTLS); a downstream consumer that trusts the provider
     /// verifies them. With no attestations this is the canonical
     /// `Poseidon2::hash([], 0)` digest, NOT `[0u8; 32]`.
+    ///
+    /// Under [`compute_public_inputs_sha256`] this is the SHA-256 scheme's
+    /// equivalent (`OracleTape::attestation_commitment_sha256`), which is
+    /// likewise a real digest rather than zero when no attestations are present.
     pub attestation_hash: [u8; 32],
 
     /// SHA-256 of the canonical encoding of the `OraclePolicy` document.
     /// Zero until Phase 2 populates this field.
     pub policy_hash: [u8; 32], // Phase 2 stub
+}
+
+impl PublicInputs {
+    /// SHA-256 digest over all six commitments, in struct declaration order.
+    ///
+    /// ```text
+    /// digest = SHA256( program_hash ‖ input_hash ‖ tool_responses_hash
+    ///                  ‖ output_hash ‖ attestation_hash ‖ policy_hash )
+    /// ```
+    ///
+    /// A zkVM guest reveals this single 32-byte value rather than all 192
+    /// bytes: public values are a constrained resource (OpenVM's default
+    /// budget is 32 bytes) and each one costs proving work. A verifier
+    /// receives the six values out of band, recomputes the digest, and checks
+    /// it against the proof — the same journal-digest pattern other zkVMs use.
+    ///
+    /// The field order is fixed by this function and must not be reordered;
+    /// it is the wire format a verifier depends on. Note it is the *struct*
+    /// order, which is deliberately not the Noir circuit's public-input order
+    /// (see `contracts/src/Types.sol`) — the two backends are separate
+    /// verification paths and do not share a layout.
+    pub fn digest_sha256(&self) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(self.program_hash);
+        h.update(self.input_hash);
+        h.update(self.tool_responses_hash);
+        h.update(self.output_hash);
+        h.update(self.attestation_hash);
+        h.update(self.policy_hash);
+        h.finalize().into()
+    }
 }
 
 /// Compute the `input_hash` for a given `LuaValue`.
@@ -108,6 +150,7 @@ pub fn hash_output(output: &VmOutput) -> [u8; 32] {
 /// `attestation_hash` is derived from the oracle tape: each recorded response
 /// is bound to the provenance attestation the host sourced for it (empty when
 /// none). See `OracleTape::attestation_commitment`.
+#[cfg(feature = "poseidon")]
 pub fn compute_public_inputs(
     program_hash: [u8; 32],
     input_value: &LuaValue,
@@ -124,10 +167,66 @@ pub fn compute_public_inputs(
     }
 }
 
+/// Build `PublicInputs` using the SHA-256 commitment scheme, for zkVM backends.
+///
+/// Identical to [`compute_public_inputs`] in every field except the two tape
+/// commitments, which use SHA-256 rather than Poseidon2. `input_hash` is
+/// already SHA-256 and `output_hash` is already keccak256 (both fixed by their
+/// consumers), so only `tool_responses_hash` and `attestation_hash` differ.
+///
+/// Use this when proving with a RISC-V zkVM, where a software Poseidon2
+/// permutation absorbing 3 bytes costs orders of magnitude more guest cycles
+/// than an accelerated SHA-256 block. The resulting `PublicInputs` will NOT
+/// match one built by [`compute_public_inputs`] for the same execution; pick
+/// one scheme per verifier and stay on it.
+///
+/// `policy_hash` is `[0u8; 32]` (no-policy stub), matching
+/// [`compute_public_inputs`].
+pub fn compute_public_inputs_sha256(
+    program_hash: [u8; 32],
+    input_value: &LuaValue,
+    oracle_tape: &OracleTape,
+    output: &VmOutput,
+) -> PublicInputs {
+    compute_public_inputs_sha256_with_policy_hash(
+        program_hash,
+        input_value,
+        oracle_tape,
+        output,
+        [0u8; 32],
+    )
+}
+
+/// As [`compute_public_inputs_sha256`], but with a caller-supplied
+/// `policy_hash`.
+///
+/// Takes the hash rather than an `OraclePolicy` because the zkVM guest is
+/// `no_std` and cannot construct one: `OraclePolicy` carries `serde_json`
+/// schemas. The guest instead receives the policy's `canonical_bytes` and
+/// SHA-256s them itself (see `GuestInput::replay_public_inputs`), which is
+/// exactly what `OraclePolicy::policy_hash` does on the host.
+pub fn compute_public_inputs_sha256_with_policy_hash(
+    program_hash: [u8; 32],
+    input_value: &LuaValue,
+    oracle_tape: &OracleTape,
+    output: &VmOutput,
+    policy_hash: [u8; 32],
+) -> PublicInputs {
+    PublicInputs {
+        program_hash,
+        input_hash: hash_input(input_value),
+        tool_responses_hash: oracle_tape.commitment_hash_sha256(),
+        output_hash: hash_output(output),
+        attestation_hash: oracle_tape.attestation_commitment_sha256(),
+        policy_hash,
+    }
+}
+
 /// Build `PublicInputs` and populate `policy_hash` from the given policy.
 ///
 /// Use this variant when running under a real `OraclePolicy`. The hash is
 /// stable: same policy struct → same bytes on any machine.
+#[cfg(all(feature = "poseidon", feature = "std"))]
 pub fn compute_public_inputs_with_policy(
     program_hash: [u8; 32],
     input_value: &LuaValue,
@@ -234,6 +333,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn compute_public_inputs_fields() {
         let tape = OracleTape::new();
@@ -252,6 +352,130 @@ mod tests {
         assert_eq!(pi.policy_hash, [0u8; 32]);
     }
 
+    fn attested_tape() -> OracleTape {
+        OracleTape {
+            entries: vec![crate::host::tape::TapeEntry::Ok(
+                b"{\"price\":100}".to_vec(),
+            )],
+            attestations: vec![b"sig".to_vec()],
+        }
+    }
+
+    #[test]
+    fn compute_public_inputs_sha256_fields() {
+        let tape = attested_tape();
+        let output = make_output(LuaValue::Integer(7));
+        let program_hash = [1u8; 32];
+        let input = LuaValue::Integer(42);
+
+        let pi = compute_public_inputs_sha256(program_hash, &input, &tape, &output);
+        assert_eq!(pi.program_hash, program_hash);
+        assert_eq!(pi.input_hash, hash_input(&input));
+        assert_eq!(pi.tool_responses_hash, tape.commitment_hash_sha256());
+        assert_eq!(pi.output_hash, hash_output(&output));
+        assert_eq!(pi.attestation_hash, tape.attestation_commitment_sha256());
+        assert_eq!(pi.policy_hash, [0u8; 32]);
+    }
+
+    /// The two backends commit the same execution, but only the tape hashes
+    /// change primitive. `input_hash` (SHA-256) and `output_hash` (keccak256)
+    /// are fixed by their consumers and must be identical across backends.
+    #[cfg(feature = "poseidon")]
+    #[test]
+    fn sha256_and_poseidon_public_inputs_differ_only_in_tape_hashes() {
+        let tape = attested_tape();
+        let output = make_output(LuaValue::Integer(7));
+        let input = LuaValue::Integer(42);
+
+        let p = compute_public_inputs([1u8; 32], &input, &tape, &output);
+        let s = compute_public_inputs_sha256([1u8; 32], &input, &tape, &output);
+
+        assert_eq!(p.program_hash, s.program_hash);
+        assert_eq!(p.input_hash, s.input_hash);
+        assert_eq!(p.output_hash, s.output_hash);
+        assert_eq!(p.policy_hash, s.policy_hash);
+        assert_ne!(p.tool_responses_hash, s.tool_responses_hash);
+        assert_ne!(p.attestation_hash, s.attestation_hash);
+    }
+
+    /// Absence of attestations must still be a real commitment under SHA-256,
+    /// the same property the Poseidon2 path has.
+    #[test]
+    fn compute_public_inputs_sha256_empty_tape_hashes_are_nonzero() {
+        let tape = OracleTape::new();
+        let output = make_output(LuaValue::Nil);
+        let pi = compute_public_inputs_sha256([0u8; 32], &LuaValue::Nil, &tape, &output);
+        assert_ne!(pi.tool_responses_hash, [0u8; 32]);
+        assert_ne!(pi.attestation_hash, [0u8; 32]);
+    }
+
+    fn pi_fixture() -> PublicInputs {
+        PublicInputs {
+            program_hash: [1u8; 32],
+            input_hash: [2u8; 32],
+            tool_responses_hash: [3u8; 32],
+            output_hash: [4u8; 32],
+            attestation_hash: [5u8; 32],
+            policy_hash: [6u8; 32],
+        }
+    }
+
+    /// Golden vector computed independently: SHA-256 over the six 32-byte
+    /// fields concatenated in struct order. Pins the wire format a verifier
+    /// depends on.
+    #[test]
+    fn digest_sha256_matches_golden_vector() {
+        let hex: String = pi_fixture()
+            .digest_sha256()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            hex,
+            "4afae2731b9d72781409ee49414eba0a820bfa446703017ae764a728570bdbcd"
+        );
+    }
+
+    /// Every field must reach the digest: flipping any one of the six changes
+    /// it. A field silently dropped here would be a field the proof does not
+    /// actually bind.
+    #[test]
+    fn digest_sha256_covers_every_field() {
+        let base = pi_fixture().digest_sha256();
+        for i in 0..6 {
+            let mut pi = pi_fixture();
+            match i {
+                0 => pi.program_hash[0] ^= 1,
+                1 => pi.input_hash[0] ^= 1,
+                2 => pi.tool_responses_hash[0] ^= 1,
+                3 => pi.output_hash[0] ^= 1,
+                4 => pi.attestation_hash[0] ^= 1,
+                _ => pi.policy_hash[0] ^= 1,
+            }
+            assert_ne!(pi.digest_sha256(), base, "field {i} does not affect digest");
+        }
+    }
+
+    /// Field order is part of the wire format: swapping two fields must not
+    /// produce the same digest.
+    #[test]
+    fn digest_sha256_is_order_sensitive() {
+        let a = pi_fixture().digest_sha256();
+        let mut pi = pi_fixture();
+        core::mem::swap(&mut pi.program_hash, &mut pi.input_hash);
+        assert_ne!(pi.digest_sha256(), a);
+    }
+
+    #[test]
+    fn compute_public_inputs_sha256_is_deterministic() {
+        let tape = attested_tape();
+        let output = make_output(LuaValue::Integer(7));
+        let a = compute_public_inputs_sha256([1u8; 32], &LuaValue::Integer(42), &tape, &output);
+        let b = compute_public_inputs_sha256([1u8; 32], &LuaValue::Integer(42), &tape, &output);
+        assert_eq!(a, b);
+    }
+
+    #[cfg(feature = "poseidon")]
     #[test]
     fn compute_public_inputs_policy_hash_is_zero_without_policy() {
         let tape = OracleTape::new();
@@ -260,6 +484,7 @@ mod tests {
         assert_eq!(pi.policy_hash, [0u8; 32]);
     }
 
+    #[cfg(all(feature = "poseidon", feature = "std"))]
     #[test]
     fn compute_public_inputs_with_policy_nonzero_hash() {
         use crate::policy::profiles::constrained_http_v1;
@@ -274,6 +499,7 @@ mod tests {
         assert_eq!(pi.policy_hash, policy.policy_hash());
     }
 
+    #[cfg(all(feature = "poseidon", feature = "std"))]
     #[test]
     fn compute_public_inputs_with_policy_hash_stable() {
         use crate::policy::profiles::template_price_feed_v1;

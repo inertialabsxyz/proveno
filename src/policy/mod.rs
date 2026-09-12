@@ -6,35 +6,40 @@
 //!
 //! See `docs/canonical-serialization.md` for the byte-exact hash format.
 
+pub mod canonical;
+
+/// The `no_std` half of the policy, shared with the zkVM guest.
+///
+/// `TlsRequirement` and `extract_domain` live in [`canonical`] so a guest can
+/// use them without `std`; they are re-exported here so host code can keep
+/// referring to `policy::TlsRequirement`.
+pub use canonical::{PolicyParseError, PolicyView, TlsRequirement, extract_domain, is_http_tool};
+
+#[cfg(feature = "std")]
 pub mod profiles;
 
+#[cfg(feature = "std")]
 use sha2::{Digest, Sha256};
+#[cfg(feature = "std")]
 use std::collections::HashMap;
-
-/// TLS enforcement requirement for HTTPS tool calls.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TlsRequirement {
-    /// Every HTTPS response must carry a P-256 ECDSA-verified attestation.
-    RequiredAttested,
-    /// HTTPS responses should be attested; unattested calls are allowed but flagged.
-    PreferredAttested,
-    /// TLS attestation is not required.
-    UnattestedPermitted,
-}
 
 /// Defines admissibility for one oracle execution.
 ///
 /// An execution is *policy-approved* only when every tool call satisfies
 /// the constraints below. The `policy_hash()` commits to this document so
 /// a verifier can point to a single hash and know exactly what was allowed.
+#[cfg(feature = "std")]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OraclePolicy {
     /// Domains that `http_get` / `http_post` may contact.
     /// Empty = no domain restriction (any domain is allowed).
+    #[cfg_attr(feature = "serde", serde(default))]
     pub allowed_domains: Vec<String>,
 
     /// HTTP tool names that may be called (`"http_get"`, `"http_post"`, …).
     /// Empty = no method restriction (all HTTP tools are allowed).
+    #[cfg_attr(feature = "serde", serde(default))]
     pub allowed_http_methods: Vec<String>,
 
     /// Maximum number of tool calls per execution.
@@ -47,6 +52,7 @@ pub struct OraclePolicy {
     pub tls_requirement: TlsRequirement,
 
     /// Optional JSON schema that the program's final output must match.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub required_output_schema: Option<serde_json::Value>,
 
     /// Per-domain response schemas. After a successful HTTP tool call, the
@@ -54,10 +60,67 @@ pub struct OraclePolicy {
     /// Domains with no entry are not validated.
     ///
     /// `// Phase 4 stub` — populated by template_price_feed_v1 in Phase 4.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub schema_versions: HashMap<String, serde_json::Value>,
 }
 
+#[cfg(feature = "std")]
 impl OraclePolicy {
+    /// Parse a policy from JSON.
+    ///
+    /// Every field except the two limits defaults to empty, so a test policy
+    /// need only state what it actually constrains:
+    ///
+    /// ```json
+    /// {
+    ///   "allowed_domains": ["api.coingecko.com"],
+    ///   "allowed_http_methods": ["http_get"],
+    ///   "max_tool_calls": 4,
+    ///   "max_payload_bytes_per_call": 65536,
+    ///   "tls_requirement": "UnattestedPermitted"
+    /// }
+    /// ```
+    ///
+    /// Note an empty `allowed_domains` or `allowed_http_methods` means *no
+    /// restriction*, not *deny everything*, so omitting them widens the policy
+    /// rather than narrowing it.
+    #[cfg(feature = "serde")]
+    pub fn from_json(src: &str) -> Result<Self, String> {
+        serde_json::from_str(src).map_err(|e| format!("invalid policy JSON: {e}"))
+    }
+
+    /// Resolve a policy from a CLI argument: either a built-in profile name or
+    /// a path to a JSON policy file.
+    ///
+    /// Lives here rather than in each CLI because `proveno-witness`,
+    /// `proveno-openvm-host` and `proveno-orchestrator` all need the same
+    /// resolution, and they must agree exactly — a mismatch between the policy
+    /// enforced during the dry run and the one committed in `policy_hash`
+    /// would produce a proof that names a policy it did not run under.
+    #[cfg(feature = "serde")]
+    pub fn load_spec(spec: &str) -> Result<Self, String> {
+        match spec {
+            "constrained_http_v1" => Ok(profiles::constrained_http_v1()),
+            "template_price_feed_v1" => Ok(profiles::template_price_feed_v1()),
+            path => {
+                let src = std::fs::read_to_string(path).map_err(|e| {
+                    format!(
+                        "policy '{path}' is not a built-in profile \
+                         (constrained_http_v1, template_price_feed_v1) \
+                         and could not be read as a file: {e}"
+                    )
+                })?;
+                Self::from_json(&src).map_err(|e| format!("{path}: {e}"))
+            }
+        }
+    }
+
+    /// Serialize back to pretty JSON. Round-trips through [`Self::from_json`].
+    #[cfg(feature = "serde")]
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).expect("OraclePolicy is always serializable")
+    }
+
     /// Produce the stable canonical byte representation of this policy.
     ///
     /// The format is specified in `docs/canonical-serialization.md`.
@@ -181,25 +244,12 @@ impl OraclePolicy {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-/// Extract the hostname from a URL string (no port, no path).
-///
-/// `"https://api.example.com/v1/price"` → `"api.example.com"`
-pub fn extract_domain(url: &str) -> Option<&str> {
-    let rest = if let Some(idx) = url.find("://") {
-        &url[idx + 3..]
-    } else {
-        url
-    };
-    let rest = rest.split('/').next().unwrap_or(rest);
-    let host = rest.split(':').next().unwrap_or(rest);
-    if host.is_empty() { None } else { Some(host) }
-}
-
 /// Check whether `actual` satisfies `schema`.
 ///
 /// Each key in a schema object must be present in `actual` with a value of
 /// the same JSON type. `null` in the schema accepts any value.
 /// Extra keys in `actual` are permitted.
+#[cfg(feature = "std")]
 fn schema_matches(schema: &serde_json::Value, actual: &serde_json::Value) -> bool {
     match schema {
         serde_json::Value::Null => true,
@@ -233,10 +283,12 @@ fn schema_matches(schema: &serde_json::Value, actual: &serde_json::Value) -> boo
 ///
 /// Object keys are sorted lexicographically. The output is compact (no whitespace).
 /// This produces the same bytes on any machine for the same value.
+#[cfg(feature = "std")]
 fn canonical_json_bytes(v: &serde_json::Value) -> Vec<u8> {
     canonical_json_write(v).into_bytes()
 }
 
+#[cfg(feature = "std")]
 fn canonical_json_write(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::Null => "null".to_owned(),
@@ -267,7 +319,7 @@ fn canonical_json_write(v: &serde_json::Value) -> String {
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
 
@@ -281,6 +333,176 @@ mod tests {
             required_output_schema: None,
             schema_versions: HashMap::new(),
         }
+    }
+
+    // ── JSON policy files ────────────────────────────────────────────────────
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn from_json_parses_a_minimal_policy() {
+        let p = OraclePolicy::from_json(
+            r#"{
+                "allowed_domains": ["api.coingecko.com"],
+                "allowed_http_methods": ["http_get"],
+                "max_tool_calls": 4,
+                "max_payload_bytes_per_call": 65536,
+                "tls_requirement": "UnattestedPermitted"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(p.allowed_domains, vec!["api.coingecko.com"]);
+        assert_eq!(p.allowed_http_methods, vec!["http_get"]);
+        assert_eq!(p.max_tool_calls, 4);
+        assert_eq!(p.tls_requirement, TlsRequirement::UnattestedPermitted);
+        assert!(p.required_output_schema.is_none());
+        assert!(p.schema_versions.is_empty());
+    }
+
+    /// The hash is what gets committed, so a file round-tripping through
+    /// to_json/from_json must not perturb it.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn json_round_trip_preserves_policy_hash() {
+        let mut p = minimal_policy();
+        p.allowed_domains = vec!["b.example".into(), "a.example".into()];
+        p.allowed_http_methods = vec!["http_get".into()];
+        p.schema_versions
+            .insert("a.example".into(), serde_json::json!({"price": 0}));
+        p.required_output_schema = Some(serde_json::json!({"ok": true}));
+
+        let back = OraclePolicy::from_json(&p.to_json()).unwrap();
+        assert_eq!(back.policy_hash(), p.policy_hash());
+    }
+
+    /// Omitting a list means "no restriction", so a sparse file is *wider*
+    /// than a full one, not narrower. Easy to get backwards when authoring a
+    /// policy, so pin it.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn omitted_lists_mean_unrestricted_not_denied() {
+        let p = OraclePolicy::from_json(
+            r#"{"max_tool_calls": 2, "max_payload_bytes_per_call": 1024,
+                "tls_requirement": "UnattestedPermitted"}"#,
+        )
+        .unwrap();
+        assert!(p.allowed_domains.is_empty());
+        assert!(
+            p.check_http_call("http_get", "https://anything.example")
+                .is_ok()
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn from_json_rejects_malformed_input() {
+        assert!(OraclePolicy::from_json("{ not json").is_err());
+        // max_tool_calls has no default; leaving it out is a real error rather
+        // than a silent zero.
+        assert!(OraclePolicy::from_json(r#"{"tls_requirement":"UnattestedPermitted"}"#).is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn different_policy_files_hash_differently() {
+        let a = OraclePolicy::from_json(
+            r#"{"allowed_domains":["a.example"],"max_tool_calls":4,
+                "max_payload_bytes_per_call":1024,"tls_requirement":"UnattestedPermitted"}"#,
+        )
+        .unwrap();
+        let b = OraclePolicy::from_json(
+            r#"{"allowed_domains":["b.example"],"max_tool_calls":4,
+                "max_payload_bytes_per_call":1024,"tls_requirement":"UnattestedPermitted"}"#,
+        )
+        .unwrap();
+        assert_ne!(a.policy_hash(), b.policy_hash());
+    }
+
+    // ── canonical_bytes ↔ PolicyView::parse agreement ────────────────────────
+
+    /// The load-bearing invariant behind guest-side enforcement: the guest
+    /// derives *both* `policy_hash` and the rules it enforces from this one
+    /// buffer, so `PolicyView::parse` must read back exactly what
+    /// `canonical_bytes` wrote. A field added, reordered or resized on one side
+    /// only would silently make the guest enforce a different policy from the
+    /// one it commits.
+    #[test]
+    fn canonical_bytes_round_trip_through_policy_view() {
+        let mut p = minimal_policy();
+        p.allowed_domains = vec!["b.example".into(), "a.example".into()];
+        p.allowed_http_methods = vec!["http_post".into(), "http_get".into()];
+        p.max_tool_calls = 7;
+        p.max_payload_bytes_per_call = 4096;
+        p.tls_requirement = TlsRequirement::RequiredAttested;
+        p.required_output_schema = Some(serde_json::json!({"ok": true}));
+        p.schema_versions
+            .insert("a.example".into(), serde_json::json!({"price": 0}));
+        p.schema_versions
+            .insert("b.example".into(), serde_json::json!({"qty": 0}));
+
+        let bytes = p.canonical_bytes();
+        let view = PolicyView::parse(&bytes).expect("canonical bytes must parse");
+
+        // Sorted, because that is the order canonical_bytes emits.
+        assert_eq!(view.allowed_domains, vec!["a.example", "b.example"]);
+        assert_eq!(view.allowed_http_methods, vec!["http_get", "http_post"]);
+        assert_eq!(view.max_tool_calls, 7);
+        assert_eq!(view.max_payload_bytes_per_call, 4096);
+        assert_eq!(view.tls_requirement, TlsRequirement::RequiredAttested);
+    }
+
+    /// Host and guest must reach the same verdict on the same call, or a run
+    /// the dry run permitted becomes unprovable (or, worse, the reverse).
+    #[test]
+    fn policy_view_and_oracle_policy_agree_on_http_calls() {
+        let mut p = minimal_policy();
+        p.allowed_domains = vec!["api.example.com".into()];
+        p.allowed_http_methods = vec!["http_get".into()];
+        let bytes = p.canonical_bytes();
+        let view = PolicyView::parse(&bytes).unwrap();
+
+        for (tool, url) in [
+            ("http_get", "https://api.example.com/v1"),
+            ("http_get", "https://evil.example/steal"),
+            ("http_post", "https://api.example.com/v1"),
+            ("http_get", "api.example.com:8443/v1"),
+            ("http_get", ""),
+        ] {
+            assert_eq!(
+                p.check_http_call(tool, url).is_ok(),
+                view.check_http_call(tool, url).is_ok(),
+                "host and guest disagree on {tool} {url}"
+            );
+        }
+    }
+
+    /// A tls_requirement byte outside 0..=2 is refused rather than defaulted,
+    /// and every truncation of a valid buffer is refused rather than partially
+    /// applied — a partially applied policy is indistinguishable from a weaker
+    /// one.
+    #[test]
+    fn policy_view_refuses_corrupt_bytes_rather_than_weakening() {
+        let mut p = minimal_policy();
+        p.allowed_domains = vec!["api.example.com".into()];
+        let bytes = p.canonical_bytes();
+        assert!(PolicyView::parse(&bytes).is_ok());
+
+        for cut in 0..bytes.len() {
+            assert!(
+                PolicyView::parse(&bytes[..cut]).is_err(),
+                "truncation to {cut} bytes was accepted"
+            );
+        }
+
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        assert!(PolicyView::parse(&trailing).is_err());
+
+        // Offset of the tls_requirement byte: the two string lists, then the
+        // two u64 limits.
+        let tls_at = bytes.len() - 1 - 4 - 4;
+        let mut bad_tls = bytes.clone();
+        bad_tls[tls_at] = 3;
+        assert!(PolicyView::parse(&bad_tls).is_err());
     }
 
     #[test]

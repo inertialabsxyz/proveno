@@ -9,24 +9,18 @@
 //! same return value) without making any external calls, which makes it
 //! suitable for execution inside a zkVM guest.
 
+#[cfg(feature = "poseidon")]
+use crate::host::poseidon2::{
+    bytes_to_fields, field_to_be_bytes32, poseidon2_hash, u8_to_field, u32_to_field,
+};
 use crate::{
-    host::{
-        canonicalize::canonical_deserialize,
-        poseidon2::{
-            bytes_to_fields, field_to_be_bytes32, poseidon2_hash, u8_to_field, u32_to_field,
-        },
-        transcript::ToolCallRecord,
-    },
+    host::{canonicalize::canonical_deserialize, transcript::ToolCallRecord},
     types::{table::LuaTable, value::LuaValue},
     vm::engine::HostInterface,
 };
 #[cfg(not(feature = "std"))]
-use alloc::{
-    borrow::ToOwned,
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{borrow::ToOwned, format, string::String, vec::Vec};
+use sha2::{Digest, Sha256};
 
 // ── TapeEntry ────────────────────────────────────────────────────────────────
 
@@ -111,15 +105,13 @@ impl OracleTape {
     ///
     /// An empty tape commits to `Poseidon2([])` — a fixed sponge-IV-only
     /// digest derived from the zero-length domain separator.
+    #[cfg(feature = "poseidon")]
     pub fn commitment_hash(&self) -> [u8; 32] {
         let leaves: Vec<_> = self
             .entries
             .iter()
             .map(|entry| {
-                let (tag, payload): (u8, &[u8]) = match entry {
-                    TapeEntry::Ok(bytes) => (0x00, bytes.as_slice()),
-                    TapeEntry::Err(msg) => (0x01, msg.as_bytes()),
-                };
+                let (tag, payload) = Self::entry_parts(entry);
                 Self::response_leaf(tag, payload)
             })
             .collect();
@@ -127,6 +119,7 @@ impl OracleTape {
     }
 
     /// Hex-encoded Poseidon2 commitment hash (64 lowercase hex chars).
+    #[cfg(feature = "poseidon")]
     pub fn commitment_hash_hex(&self) -> String {
         self.commitment_hash()
             .iter()
@@ -140,6 +133,7 @@ impl OracleTape {
     /// commitment. `attestation_commitment` reuses it so the provenance bind is
     /// provably over the *same* response bytes that `tool_responses_hash`
     /// commits to — the circuit computes this leaf once and feeds both hashes.
+    #[cfg(feature = "poseidon")]
     fn response_leaf(tag: u8, payload: &[u8]) -> crate::host::poseidon2::FieldElement {
         let mut inputs = Vec::with_capacity(2 + payload.len());
         inputs.push(u8_to_field(tag));
@@ -174,16 +168,14 @@ impl OracleTape {
     /// is well-defined whether or not provenance is present.
     ///
     /// An empty tape commits to `Poseidon2([])`, matching `commitment_hash`.
+    #[cfg(feature = "poseidon")]
     pub fn attestation_commitment(&self) -> [u8; 32] {
         let leaves: Vec<_> = self
             .entries
             .iter()
             .enumerate()
             .map(|(i, entry)| {
-                let (tag, payload): (u8, &[u8]) = match entry {
-                    TapeEntry::Ok(bytes) => (0x00, bytes.as_slice()),
-                    TapeEntry::Err(msg) => (0x01, msg.as_bytes()),
-                };
+                let (tag, payload) = Self::entry_parts(entry);
                 let resp_leaf = Self::response_leaf(tag, payload);
                 let att_leaf = Self::att_leaf(self.attestation_at(i));
                 poseidon2_hash(&[resp_leaf, att_leaf])
@@ -201,6 +193,7 @@ impl OracleTape {
     }
 
     /// Attestation leaf for one blob: `Poseidon2(att_len, att_bytes...)`.
+    #[cfg(feature = "poseidon")]
     fn att_leaf(attestation: &[u8]) -> crate::host::poseidon2::FieldElement {
         let mut inputs = Vec::with_capacity(1 + attestation.len());
         inputs.push(u32_to_field(attestation.len() as u32));
@@ -215,12 +208,125 @@ impl OracleTape {
     /// reproduce `attestation_commitment` *without* the raw attestation bytes
     /// in-circuit. Bind-only: the leaf is a pass-through commitment to the blob,
     /// which the circuit does not verify.
+    #[cfg(feature = "poseidon")]
     pub fn attestation_leaves_be(&self) -> Vec<[u8; 32]> {
         self.entries
             .iter()
             .enumerate()
             .map(|(i, _)| field_to_be_bytes32(Self::att_leaf(self.attestation_at(i))))
             .collect()
+    }
+
+    // ── SHA-256 commitment scheme (zkVM backends) ────────────────────────────
+    //
+    // Structurally identical to the Poseidon2 scheme above, with SHA-256 as the
+    // primitive and byte-string concatenation in place of field absorption.
+    // Parity is deliberate: both backends must attest the same shape of claim,
+    // so the only difference between them is the hash function.
+    //
+    // Poseidon2 is the right primitive inside a Noir/UltraHonk circuit, where
+    // BN254 arithmetic is native and SHA-256 costs ~25k constraints per block.
+    // In a RISC-V zkVM the cost model inverts: a Poseidon2 permutation is
+    // software 254-bit modmul (488 field muls) absorbing only 3 bytes, while
+    // SHA-256 is a single accelerated instruction per 64-byte block. Hence one
+    // scheme per backend rather than one scheme everywhere.
+
+    /// SHA-256 commitment over all tape entries in order.
+    ///
+    /// The zkVM-backend counterpart to [`OracleTape::commitment_hash`]:
+    ///
+    /// ```text
+    ///     leaf_i      = SHA256( tag ‖ len_be32 ‖ payload )
+    ///     commitment  = SHA256( n_be32 ‖ leaf_0 ‖ … ‖ leaf_{n-1} )
+    /// ```
+    ///
+    /// The outer leaf count is prefixed for the same reason the Poseidon2
+    /// sponge seeds its capacity with the message length: without it, tapes of
+    /// different lengths could collide under concatenation.
+    pub fn commitment_hash_sha256(&self) -> [u8; 32] {
+        let mut outer = Sha256::new();
+        outer.update((self.entries.len() as u32).to_be_bytes());
+        for entry in &self.entries {
+            let (tag, payload) = Self::entry_parts(entry);
+            outer.update(Self::response_leaf_sha256(tag, payload));
+        }
+        outer.finalize().into()
+    }
+
+    /// Hex-encoded SHA-256 commitment hash (64 lowercase hex chars).
+    pub fn commitment_hash_sha256_hex(&self) -> String {
+        self.commitment_hash_sha256()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    /// Bind-only provenance commitment under SHA-256.
+    ///
+    /// The zkVM-backend counterpart to [`OracleTape::attestation_commitment`],
+    /// with the same nesting so each response leaf is shared between the two
+    /// commitments:
+    ///
+    /// ```text
+    ///     resp_leaf_i  = SHA256( tag ‖ resp_len_be32 ‖ resp_bytes )
+    ///     att_leaf_i   = SHA256( att_len_be32 ‖ att_bytes )
+    ///     bound_leaf_i = SHA256( resp_leaf_i ‖ att_leaf_i )
+    ///     commitment   = SHA256( n_be32 ‖ bound_leaf_0 ‖ … )
+    /// ```
+    ///
+    /// Bind, not verify: the attestation bytes are committed, never checked.
+    pub fn attestation_commitment_sha256(&self) -> [u8; 32] {
+        let mut outer = Sha256::new();
+        outer.update((self.entries.len() as u32).to_be_bytes());
+        for (i, entry) in self.entries.iter().enumerate() {
+            let (tag, payload) = Self::entry_parts(entry);
+            let mut bound = Sha256::new();
+            bound.update(Self::response_leaf_sha256(tag, payload));
+            bound.update(Self::att_leaf_sha256(self.attestation_at(i)));
+            let bound: [u8; 32] = bound.finalize().into();
+            outer.update(bound);
+        }
+        outer.finalize().into()
+    }
+
+    /// Per-entry attestation leaves under SHA-256, in tape order.
+    ///
+    /// The zkVM counterpart to [`OracleTape::attestation_leaves_be`]: a guest
+    /// takes these as input and recombines them with the response leaves it
+    /// computes, reproducing `attestation_commitment_sha256` without needing
+    /// the raw attestation bytes.
+    pub fn attestation_leaves_sha256(&self) -> Vec<[u8; 32]> {
+        (0..self.entries.len())
+            .map(|i| Self::att_leaf_sha256(self.attestation_at(i)))
+            .collect()
+    }
+
+    /// `(tag, payload)` for one entry — `0x00` = Ok, `0x01` = Err.
+    ///
+    /// Shared by both commitment schemes so the tag/payload split cannot drift
+    /// between them.
+    fn entry_parts(entry: &TapeEntry) -> (u8, &[u8]) {
+        match entry {
+            TapeEntry::Ok(bytes) => (0x00, bytes.as_slice()),
+            TapeEntry::Err(msg) => (0x01, msg.as_bytes()),
+        }
+    }
+
+    /// Per-entry response leaf — `SHA256(tag ‖ len_be32 ‖ payload)`.
+    fn response_leaf_sha256(tag: u8, payload: &[u8]) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update([tag]);
+        h.update((payload.len() as u32).to_be_bytes());
+        h.update(payload);
+        h.finalize().into()
+    }
+
+    /// Attestation leaf for one blob — `SHA256(att_len_be32 ‖ att_bytes)`.
+    fn att_leaf_sha256(attestation: &[u8]) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update((attestation.len() as u32).to_be_bytes());
+        h.update(attestation);
+        h.finalize().into()
     }
 
     pub fn len(&self) -> usize {
@@ -378,6 +484,7 @@ mod tests {
 
     // ── OracleTape::commitment_hash ───────────────────────────────────────────
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_is_32_bytes() {
         let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
@@ -385,6 +492,7 @@ mod tests {
         assert_eq!(h.len(), 32);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_hex_is_64_hex_chars() {
         let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
@@ -393,6 +501,7 @@ mod tests {
         assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_empty_tape_is_deterministic() {
         let h1 = OracleTape::new().commitment_hash();
@@ -400,6 +509,7 @@ mod tests {
         assert_eq!(h1, h2);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_differs_for_different_entries() {
         let t1 = OracleTape::from_records(&[ok_record(0, b"{\"a\":1}")]);
@@ -407,6 +517,7 @@ mod tests {
         assert_ne!(t1.commitment_hash(), t2.commitment_hash());
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn commitment_hash_ok_vs_err_differs() {
         let t_ok = OracleTape::from_records(&[ok_record(0, b"\"msg\"")]);
@@ -416,12 +527,14 @@ mod tests {
 
     // ── OracleTape::attestation_commitment (bind-only provenance) ─────────────
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_is_32_bytes() {
         let tape = OracleTape::from_records(&[ok_record_att(0, b"{}", b"sig")]);
         assert_eq!(tape.attestation_commitment().len(), 32);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_empty_tape_is_deterministic() {
         let h1 = OracleTape::new().attestation_commitment();
@@ -429,6 +542,7 @@ mod tests {
         assert_eq!(h1, h2);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_is_deterministic_for_same_tape() {
         // Replaying the same (response, attestation) pairs yields the identical
@@ -439,6 +553,7 @@ mod tests {
         assert_eq!(h1, h2);
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_binds_to_response_bytes() {
         // Same attestation, tampered response → different commitment.
@@ -450,6 +565,7 @@ mod tests {
         assert_ne!(t1.attestation_commitment(), t2.attestation_commitment());
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_binds_to_attestation_bytes() {
         // Same response, different attestation → different commitment.
@@ -459,6 +575,7 @@ mod tests {
         assert_ne!(t1.attestation_commitment(), t2.attestation_commitment());
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_attested_differs_from_unattested() {
         let resp = b"{\"price\":100}";
@@ -470,6 +587,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "poseidon")]
     #[test]
     fn attestation_commitment_is_independent_of_tool_responses_hash() {
         // The provenance commitment is a separate slot — it must not perturb the
@@ -477,6 +595,159 @@ mod tests {
         let attested = OracleTape::from_records(&[ok_record_att(0, b"{}", b"sig")]);
         let unattested = OracleTape::from_records(&[ok_record(0, b"{}")]);
         assert_eq!(attested.commitment_hash(), unattested.commitment_hash());
+    }
+
+    // ── SHA-256 commitment scheme (zkVM backends) ────────────────────────────
+
+    /// Golden vectors computed independently of this implementation, so the
+    /// test pins the wire format rather than snapshotting whatever the code
+    /// happens to do. Preimages:
+    ///     leaf       = SHA256( 0x00 ‖ 0x00000002 ‖ "{}" )
+    ///     commitment = SHA256( 0x00000001 ‖ leaf )
+    #[test]
+    fn commitment_hash_sha256_matches_golden_vector() {
+        let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
+        assert_eq!(
+            tape.commitment_hash_sha256_hex(),
+            "ade1fdb799ff7c13ad62e1060eea55b72f53a9f012491f2e3bd989e801bb4ca4"
+        );
+    }
+
+    /// `att_leaf = SHA256(0x00000000)` for the unattested entry, then
+    /// `commitment = SHA256( 0x00000001 ‖ SHA256(resp_leaf ‖ att_leaf) )`.
+    #[test]
+    fn attestation_commitment_sha256_matches_golden_vector() {
+        let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
+        let hex: String = tape
+            .attestation_commitment_sha256()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            hex,
+            "0abdf04117475e4d4dec1286cb50c28d0a08e598ac5515dd8128cea354b8aba3"
+        );
+    }
+
+    /// The empty tape commits to `SHA256(0x00000000)`, not `[0u8; 32]` — the
+    /// same "absence is a real commitment" property the Poseidon2 scheme has.
+    #[test]
+    fn commitment_hash_sha256_empty_tape_is_length_prefix_only() {
+        assert_eq!(
+            OracleTape::new().commitment_hash_sha256_hex(),
+            "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+        );
+        assert_ne!(OracleTape::new().commitment_hash_sha256(), [0u8; 32]);
+    }
+
+    #[test]
+    fn commitment_hash_sha256_hex_is_64_hex_chars() {
+        let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
+        let h = tape.commitment_hash_sha256_hex();
+        assert_eq!(h.len(), 64);
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn commitment_hash_sha256_differs_for_different_entries() {
+        let t1 = OracleTape::from_records(&[ok_record(0, b"{\"a\":1}")]);
+        let t2 = OracleTape::from_records(&[ok_record(0, b"{\"a\":2}")]);
+        assert_ne!(t1.commitment_hash_sha256(), t2.commitment_hash_sha256());
+    }
+
+    #[test]
+    fn commitment_hash_sha256_ok_vs_err_differs() {
+        // The 0x00/0x01 tag is what separates these two: both carry the same
+        // payload bytes.
+        let t_ok = OracleTape::from_records(&[ok_record(0, b"msg")]);
+        let t_err = OracleTape::from_records(&[err_record(0, "msg")]);
+        assert_ne!(
+            t_ok.commitment_hash_sha256(),
+            t_err.commitment_hash_sha256()
+        );
+    }
+
+    /// Without the per-leaf length prefix, `["ab", "c"]` and `["a", "bc"]`
+    /// would hash identically. This pins that the framing is unambiguous.
+    #[test]
+    fn commitment_hash_sha256_resists_payload_boundary_collisions() {
+        let t1 = OracleTape::from_records(&[ok_record(0, b"ab"), ok_record(1, b"c")]);
+        let t2 = OracleTape::from_records(&[ok_record(0, b"a"), ok_record(1, b"bc")]);
+        assert_ne!(t1.commitment_hash_sha256(), t2.commitment_hash_sha256());
+    }
+
+    /// Same leaves, different tape length, must not collide — this is what the
+    /// outer count prefix buys.
+    #[test]
+    fn commitment_hash_sha256_binds_entry_count() {
+        let one = OracleTape::from_records(&[ok_record(0, b"{}")]);
+        let two = OracleTape::from_records(&[ok_record(0, b"{}"), ok_record(1, b"{}")]);
+        assert_ne!(one.commitment_hash_sha256(), two.commitment_hash_sha256());
+    }
+
+    #[test]
+    fn commitment_hash_sha256_is_deterministic_across_rebuilds() {
+        let recs = || vec![ok_record_att(0, b"{\"p\":1}", b"sigA"), err_record(1, "x")];
+        let h1 = OracleTape::from_records(&recs()).commitment_hash_sha256();
+        let h2 = OracleTape::from_records(&recs()).commitment_hash_sha256();
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn attestation_commitment_sha256_binds_to_response_bytes() {
+        let same_sig = b"sig";
+        let t1 = OracleTape::from_records(&[ok_record_att(0, b"{\"price\":100}", same_sig)]);
+        let t2 = OracleTape::from_records(&[ok_record_att(0, b"{\"price\":999}", same_sig)]);
+        assert_ne!(
+            t1.attestation_commitment_sha256(),
+            t2.attestation_commitment_sha256()
+        );
+    }
+
+    #[test]
+    fn attestation_commitment_sha256_binds_to_attestation_bytes() {
+        let resp = b"{\"price\":100}";
+        let t1 = OracleTape::from_records(&[ok_record_att(0, resp, b"sigA")]);
+        let t2 = OracleTape::from_records(&[ok_record_att(0, resp, b"sigB")]);
+        assert_ne!(
+            t1.attestation_commitment_sha256(),
+            t2.attestation_commitment_sha256()
+        );
+    }
+
+    #[test]
+    fn attestation_commitment_sha256_is_independent_of_tool_responses_hash() {
+        let attested = OracleTape::from_records(&[ok_record_att(0, b"{}", b"sig")]);
+        let unattested = OracleTape::from_records(&[ok_record(0, b"{}")]);
+        assert_eq!(
+            attested.commitment_hash_sha256(),
+            unattested.commitment_hash_sha256()
+        );
+        assert_ne!(
+            attested.attestation_commitment_sha256(),
+            unattested.attestation_commitment_sha256()
+        );
+    }
+
+    /// A guest recombines these leaves with the response leaves it computes, so
+    /// the count must line up with the tape and the values must be stable.
+    #[test]
+    fn attestation_leaves_sha256_align_with_entries() {
+        let tape =
+            OracleTape::from_records(&[ok_record_att(0, b"{}", b"sigA"), ok_record(1, b"{}")]);
+        let leaves = tape.attestation_leaves_sha256();
+        assert_eq!(leaves.len(), 2);
+        assert_ne!(leaves[0], leaves[1]);
+        assert_eq!(leaves, tape.attestation_leaves_sha256());
+    }
+
+    /// The two schemes commit the same claim with different primitives; they
+    /// must not be confused for one another at a call site.
+    #[cfg(feature = "poseidon")]
+    #[test]
+    fn sha256_and_poseidon_commitments_are_distinct() {
+        let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
+        assert_ne!(tape.commitment_hash(), tape.commitment_hash_sha256());
     }
 
     // ── TapeHost ─────────────────────────────────────────────────────────────

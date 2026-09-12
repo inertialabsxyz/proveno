@@ -216,3 +216,123 @@ shipping circuit.
 This reclassifies GH#35. It is not deferred performance work. It is the
 prerequisite for proving real API responses at all, and the difference between a
 1 KB tape cap and a 64 KB one costing nothing.
+
+---
+
+# OpenVM backend baseline
+
+Same programs, the OpenVM zkVM backend. These numbers stand on their own; they
+are **not** comparable to the UltraHonk tables above, because the two backends
+prove different claims. The Noir circuit constrains control flow only (see
+section 4) — it never re-derives arithmetic, and `string.byte`/`json.decode` are
+opaque trusted steps. OpenVM proves the actual RISC-V execution of the whole
+interpreter, so every operation is constrained. Comparing wall-clock between a
+complete and an incomplete statement is not meaningful.
+
+Toolchain: `cargo-openvm v2.0.2 (59a69b8)`, Apple M4 Pro, 14 cores, **CPU only,
+no GPU**. Guest: `proveno-openvm`, built with `default-features = false`.
+
+## Scripts
+
+| script | what it does |
+|---|---|
+| `prove_openvm.sh <prog.lua>` | compile → dry-run → guest input → app STARK prove → verify, with timing |
+| `prove_openvm.sh <prog.lua> --stark` | same, but the aggregated (recursive) STARK level |
+
+One-off keygen: `cargo openvm keygen --app-only` for the app level,
+`cargo openvm keygen` (no flag) for the stark level, which also writes
+`agg_prefix.pk`.
+
+## 6. Proof levels
+
+OpenVM has three, and "STARK proof" is ambiguous between the first two:
+
+| level | what it is | prove | verify | proof |
+|---|---|---:|---:|---:|
+| `app` | the application STARK | 7.4 s | 0.1 s | 527 KB |
+| `stark` | app segments aggregated recursively into one root STARK | 19.8 s | 0.2 s | 522 KB |
+| `evm` | Halo2 SNARK wrapper over the above, for on-chain verification | not measured | — | — |
+
+Measured on `examples/simple.lua`. Aggregation costs ~12 s and shrinks the proof
+by only 5 KB, because a program this small fits in a single segment and there is
+nothing to compress. Aggregation earns its cost on multi-segment runs; the size
+collapse needed for on-chain use comes at the `evm` level.
+
+`cargo openvm verify stark` derives the baseline path from the binary target and
+guesses the root package, so it looks for `proveno.baseline.json` and fails.
+Pass `--app-baseline openvm/release/proveno-openvm.baseline.json`.
+
+## 7. App-level cost is linear in instructions executed
+
+Unlike the Noir circuit there is no padded ceiling: OpenVM proves the
+instructions actually executed, so cost tracks the work done rather than a
+declared cap.
+
+| program | rows | num_steps | gas | instructions | prove | verify | proof |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `simple` (factorial 5) | — | — | 142 | 127,363 | 7.4 s | 0.1 s | 527 KB |
+| `p_harness_6` | 6 | 188 | 388 | 246,701 | 8.0 s | 0.1 s | 539 KB |
+| `h_50` | 50 | 1,659 | 3,233 | 888,338 | 12.0 s | 0.1 s | 567 KB |
+| `h_100` | 100 | 3,209 | 6,313 | 1,581,817 | 19.3 s | 0.1 s | 592 KB |
+| `h_200` | 200 | 6,309 | 12,471 | 2,964,566 | 36.9 s | 0.1 s | 655 KB |
+| `h_400` | 400 | 12,514 | 24,794 | 5,735,388 | 75.9 s | 0.2 s | 768 KB |
+
+Least-squares fits across the table:
+
+- **instructions ≈ 154,400 + 445.8 × num_steps** (r² > 0.999)
+- **prove ≈ 2.8 s + 12.34 µs × instructions**, i.e. **~81,000 instructions/sec**
+- **proof ≈ 527 KB + 43 KB per million instructions**
+
+Every program above runs to a verified proof, including the ones the Noir
+circuit cannot fit at its shipping ceiling (`h_100` and up).
+
+`il_100` (86,559 steps, ≈ 39 M instructions, projected ~8 min) was not measured.
+
+## 8. Two costs worth attacking
+
+**~446 instructions per VM step.** This is the interpreter dispatch loop being
+proven natively. It is the dominant term for anything non-trivial and is what
+makes OpenVM's claim stronger than the circuit's.
+
+**~154,000 instruction fixed floor.** `simple.lua` burns 127,363 instructions to
+prove a 142-gas program, so the floor dwarfs the work for small tasks. It is
+`GuestInput` deserialization plus software SHA-256 over the commitments.
+`openvm.toml` already enables the `sha2` accelerator chip, but **nothing routes
+through it**: proveno hashes via the `sha2` crate, and the chip sits idle in the
+circuit. `openvm_sha2::Sha256` is API-identical to `sha2::Sha256` (on host
+targets it *is* that type, re-exported), so a feature-selected type alias in
+proveno would move the commitment hashing onto the chip. Unmeasured, and the
+first thing to try.
+
+## 9. Every example proves
+
+`./prove-examples.sh` runs all of `examples/*.lua` through compile → dry run →
+replay → prove → verify, reporting the stage each reaches rather than pass/fail.
+App level, same machine.
+
+| program | instructions | prove | notes |
+|---|---:|---:|---|
+| `simple` | 127,363 | 7.1 s | |
+| `eth_price` | 229,104 | 8.2 s | live `http_get` |
+| `usdc_depeg` | 252,156 | 7.1 s | live `http_get` |
+| `prover` | 283,114 | 7.5 s | live `http_get` |
+| `window_max_breach` | 323,320 | 7.1 s | returns a table |
+| `tools` | 539,099 | 8.4 s | `echo`/`add`/`upper`/`fail` |
+| `prediction_market` | 877,770 | 11.2 s | live `http_get` + `time_now` |
+| `system` | 1,154,532 | 11.1 s | largest, no tool calls |
+
+8 of 8. Two things had to be fixed to get here:
+
+- `window_max_breach` returns a table, and the driver's pre-flight divergence
+  check compared `LuaValue`s. `LuaValue::Table` uses `Rc::ptr_eq` (correct Lua
+  identity semantics), so two structurally identical tables from separate runs
+  never compare equal and every table-returning program was rejected as
+  "diverged". The check now compares canonical bytes, which is also what the
+  commitments hash.
+- `tools` and `prediction_market` needed `echo`/`add`/`upper`/`time_now`, which
+  `ProverHost` did not implement. Added, matching the orchestrator's
+  `StubHost`/`LiveHost` response shapes so the examples run unchanged.
+
+`prediction_market` only calls `llm_query` in a tiebreaker branch taken when its
+two price sources disagree. That branch needs `ANTHROPIC_API_KEY` and is still
+unimplemented in `ProverHost`; the run above did not take it.

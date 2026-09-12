@@ -134,6 +134,7 @@ fn run_pipeline_inner(
 
     let artifacts = prove::build_proof_artifacts_with_noir(
         &program,
+        &source,
         &LuaValue::Nil,
         output,
         vec![],

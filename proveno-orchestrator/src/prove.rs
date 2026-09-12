@@ -16,10 +16,28 @@ use proveno_witness::prover::DryRunResult;
 
 /// Paths and public inputs produced by `build_proof_artifacts`.
 pub struct ProveArtifacts {
+    /// The Lua source the proof is about.
+    ///
+    /// Written alongside the other artifacts because a proof of a program you
+    /// no longer have is not much use: `compiled.json` holds bytecode, not
+    /// something a human can read or recompile from.
+    pub source_path: PathBuf,
     pub compiled_path: PathBuf,
     pub dry_result_path: PathBuf,
     pub public_inputs: PublicInputs,
     pub noir_proof: Option<NoirProveSummary>,
+    pub openvm_proof: Option<OpenVmProveSummary>,
+}
+
+/// Summary of an OpenVM proof generated alongside the JSON artifacts.
+pub struct OpenVmProveSummary {
+    /// `app` or `stark`.
+    pub level: String,
+    pub proof_path: PathBuf,
+    /// The 32-byte journal digest the guest reveals, hex-encoded.
+    pub digest: String,
+    pub prove_duration_ms: u128,
+    pub verified: bool,
 }
 
 /// In-memory summary of a Noir proof generated alongside the JSON artifacts.
@@ -45,6 +63,7 @@ pub struct NoirProveSummary {
 /// not available.
 pub fn build_proof_artifacts(
     program: &CompiledProgram,
+    source: &str,
     input: &LuaValue,
     output: VmOutput,
     tls_attestations: Vec<TlsAttestationRecord>,
@@ -68,6 +87,12 @@ pub fn build_proof_artifacts(
     fs::create_dir_all(output_dir)
         .map_err(|e| format!("failed to create output directory: {e}"))?;
 
+    // The generated program itself. For an LLM-authored task this is the only
+    // human-readable record of what was proven.
+    let source_path = PathBuf::from(output_dir).join("program.lua");
+    fs::write(&source_path, source)
+        .map_err(|e| format!("failed to write {}: {e}", source_path.display()))?;
+
     // Serialize compiled program
     let compiled_path = PathBuf::from(output_dir).join("compiled.json");
     let compiled_json = serde_json::to_string_pretty(program)
@@ -83,11 +108,174 @@ pub fn build_proof_artifacts(
         .map_err(|e| format!("failed to write {}: {e}", dry_result_path.display()))?;
 
     Ok(ProveArtifacts {
+        source_path,
         compiled_path,
         dry_result_path,
         public_inputs,
         noir_proof: None,
+        openvm_proof: None,
     })
+}
+
+/// Resolve how to invoke `proveno-openvm-host`.
+///
+/// Prefers the binary sitting next to the current executable, which is where
+/// cargo puts workspace siblings. Falls back to `cargo run` only if that is
+/// missing. The preference matters: a nested `cargo run` contends for the
+/// target-directory lock, so calling this from a test under `cargo test` can
+/// block until the outer command finishes.
+fn openvm_host_command(args: Vec<String>) -> (String, Vec<String>) {
+    const BIN: &str = "proveno-openvm-host";
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let sibling = dir.join(BIN);
+        if sibling.is_file() {
+            return (sibling.display().to_string(), args);
+        }
+        // Integration tests live in target/<profile>/deps/, one level down.
+        if let Some(parent) = dir.parent() {
+            let sibling = parent.join(BIN);
+            if sibling.is_file() {
+                return (sibling.display().to_string(), args);
+            }
+        }
+    }
+    let mut fallback = vec![
+        "run".into(),
+        "-q".into(),
+        "-p".into(),
+        BIN.into(),
+        "--".into(),
+    ];
+    fallback.extend(args);
+    ("cargo".into(), fallback)
+}
+
+/// Backend-specific options for [`build_proof_artifacts_with_openvm`].
+///
+/// Grouped rather than passed positionally: with the source added this was
+/// eight arguments, four of them strings, which is easy to transpose at a call
+/// site and impossible to catch by type.
+pub struct OpenVmOptions<'a> {
+    pub output_dir: &'a str,
+    /// `app` or `stark`.
+    pub level: &'a str,
+    /// Must be the policy the execution actually ran under.
+    pub policy_spec: Option<&'a str>,
+}
+
+/// Same as `build_proof_artifacts`, but proves with the OpenVM backend.
+///
+/// Shells out to `proveno-openvm-host` over the artifacts just written, the
+/// same way the Noir path drives `nargo`/`bb`. That keeps one implementation of
+/// the guest-input encoding and the prove/verify dance rather than a second
+/// copy here.
+///
+/// `policy_spec` must be the same policy the execution ran under, or the proof
+/// commits to a policy the program was not actually constrained by.
+pub fn build_proof_artifacts_with_openvm(
+    program: &CompiledProgram,
+    source: &str,
+    input: &LuaValue,
+    output: VmOutput,
+    tls_attestations: Vec<TlsAttestationRecord>,
+    opts: OpenVmOptions<'_>,
+) -> Result<ProveArtifacts, String> {
+    let OpenVmOptions {
+        output_dir,
+        level,
+        policy_spec,
+    } = opts;
+    let mut artifacts =
+        build_proof_artifacts(program, source, input, output, tls_attestations, output_dir)?;
+
+    let proof_path = PathBuf::from(output_dir).join(format!("openvm.{level}.proof"));
+    let input_path = PathBuf::from(output_dir).join("openvm_input.json");
+
+    let mut args: Vec<String> = vec![
+        artifacts.compiled_path.display().to_string(),
+        artifacts.dry_result_path.display().to_string(),
+        "--out".into(),
+        input_path.display().to_string(),
+        "--proof".into(),
+        proof_path.display().to_string(),
+        "--prove".into(),
+    ];
+    if level == "stark" {
+        args.push("--stark".into());
+    }
+    if let Some(spec) = policy_spec {
+        args.push("--policy".into());
+        args.push(spec.into());
+    }
+
+    let (program_bin, args) = openvm_host_command(args);
+    let started = std::time::Instant::now();
+    let out = std::process::Command::new(&program_bin)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("failed to run {program_bin}: {e}"))?;
+    let elapsed = started.elapsed().as_millis();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if !out.status.success() {
+        return Err(format!(
+            "openvm proving failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+
+    let digest = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("Revealed digest: "))
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    // `build_proof_artifacts` fills `public_inputs` with the Poseidon2 scheme
+    // the Noir path uses. Those are not what this proof commits: the OpenVM
+    // guest uses SHA-256 throughout and derives `policy_hash` itself. Leaving
+    // the Poseidon2 values in place made the report print `policy_hash` as zero
+    // and "(no policy attached)" for a proof that had in fact bound the policy.
+    let dry_json = fs::read_to_string(&artifacts.dry_result_path).map_err(|e| {
+        format!(
+            "failed to read {}: {e}",
+            artifacts.dry_result_path.display()
+        )
+    })?;
+    let dry: DryRunResult = serde_json::from_str(&dry_json)
+        .map_err(|e| format!("failed to parse dry_result.json: {e}"))?;
+
+    let mut guest_input = proveno::zkvm::guest_input::GuestInput::new(
+        serde_json::from_str(
+            &fs::read_to_string(&artifacts.compiled_path)
+                .map_err(|e| format!("failed to read compiled.json: {e}"))?,
+        )
+        .map_err(|e| format!("failed to parse compiled.json: {e}"))?,
+        input.clone(),
+        dry.oracle_tape.clone(),
+        proveno::vm::engine::VmConfig::default(),
+        Vec::new(),
+    );
+    if let Some(spec) = policy_spec {
+        let policy = proveno::policy::OraclePolicy::load_spec(spec)?;
+        guest_input = guest_input.with_policy_canonical(policy.canonical_bytes());
+    }
+    match guest_input.replay_public_inputs() {
+        Ok((_, pi)) => artifacts.public_inputs = pi,
+        Err(e) => return Err(format!("recomputing OpenVM public inputs: {e:?}")),
+    }
+
+    artifacts.openvm_proof = Some(OpenVmProveSummary {
+        level: level.to_string(),
+        proof_path,
+        digest,
+        prove_duration_ms: elapsed,
+        verified: stdout.contains("generated and verified"),
+    });
+    Ok(artifacts)
 }
 
 /// Same as `build_proof_artifacts`, but additionally invokes the Noir prover
@@ -99,6 +287,7 @@ pub fn build_proof_artifacts(
 /// verify flag. Verification is always attempted.
 pub fn build_proof_artifacts_with_noir(
     program: &CompiledProgram,
+    source: &str,
     input: &LuaValue,
     output: VmOutput,
     tls_attestations: Vec<TlsAttestationRecord>,
@@ -106,7 +295,7 @@ pub fn build_proof_artifacts_with_noir(
     circuit_dir: &Path,
 ) -> Result<ProveArtifacts, String> {
     let mut artifacts =
-        build_proof_artifacts(program, input, output, tls_attestations, output_dir)?;
+        build_proof_artifacts(program, source, input, output, tls_attestations, output_dir)?;
 
     // Reconstruct the `DryRunResult` from the freshly written JSON so we
     // share the exact bytes the standalone proveno-noir CLI would consume.
@@ -201,7 +390,24 @@ pub fn format_prove_section(artifacts: &ProveArtifacts) -> String {
         "  Output hash:         {}\n",
         hex(&pi.output_hash)
     ));
+    out.push_str(&format!(
+        "  Attestation hash:    {}\n",
+        hex(&pi.attestation_hash)
+    ));
+    out.push_str(&format!(
+        "  Policy hash:         {}{}\n",
+        hex(&pi.policy_hash),
+        if pi.policy_hash == [0u8; 32] {
+            "  (no policy attached)"
+        } else {
+            ""
+        }
+    ));
     out.push('\n');
+    out.push_str(&format!(
+        "  Program source:   {}\n",
+        artifacts.source_path.display()
+    ));
     out.push_str(&format!(
         "  Compiled program: {}\n",
         artifacts.compiled_path.display()
@@ -211,6 +417,26 @@ pub fn format_prove_section(artifacts: &ProveArtifacts) -> String {
         artifacts.dry_result_path.display()
     ));
     out.push('\n');
+
+    if let Some(ov) = &artifacts.openvm_proof {
+        out.push_str("── OpenVM Proof ───────────────────────────────\n");
+        out.push_str(&format!("  Level:           {}\n", ov.level));
+        out.push_str(&format!("  Proof:           {}\n", ov.proof_path.display()));
+        out.push_str(&format!(
+            "  Prove duration:  {:.2}s\n",
+            ov.prove_duration_ms as f64 / 1000.0
+        ));
+        out.push_str(&format!(
+            "  Verified:        {}\n",
+            if ov.verified { "yes" } else { "no" }
+        ));
+        out.push_str(&format!("  Journal digest:  {}\n", ov.digest));
+        out.push_str(
+            "\n  The guest reveals the digest above, a SHA-256 over all six\n\
+             \x20 public inputs. A verifier recomputes it from those values.\n",
+        );
+        return out;
+    }
 
     match &artifacts.noir_proof {
         Some(np) => {
@@ -288,8 +514,24 @@ mod tests {
         let dir_str = dir.path().to_str().unwrap();
 
         let (program, output) = run_program("return 42");
-        let artifacts =
-            build_proof_artifacts(&program, &LuaValue::Nil, output, vec![], dir_str).unwrap();
+        let artifacts = build_proof_artifacts(
+            &program,
+            "return 42",
+            &LuaValue::Nil,
+            output,
+            vec![],
+            dir_str,
+        )
+        .unwrap();
+
+        // The generated source is written verbatim next to the artifacts. A
+        // proof of a program nobody kept a copy of is of limited use.
+        assert!(artifacts.source_path.exists());
+        assert_eq!(
+            std::fs::read_to_string(&artifacts.source_path).unwrap(),
+            "return 42"
+        );
+        assert_eq!(artifacts.source_path.file_name().unwrap(), "program.lua");
 
         // Files exist and are valid JSON
         assert!(artifacts.compiled_path.exists());
@@ -313,8 +555,15 @@ local r2 = tool.call("add", {a = 1, b = 2})
 return r1.message
 "#;
         let (program, output) = run_program(source);
-        let artifacts =
-            build_proof_artifacts(&program, &LuaValue::Nil, output, vec![], dir_str).unwrap();
+        let artifacts = build_proof_artifacts(
+            &program,
+            "return 42",
+            &LuaValue::Nil,
+            output,
+            vec![],
+            dir_str,
+        )
+        .unwrap();
 
         // Deserialize and check oracle tape
         let dry_json = fs::read_to_string(&artifacts.dry_result_path).unwrap();
@@ -330,6 +579,7 @@ return r1.message
         let (p1, o1) = run_program("return 1");
         let a1 = build_proof_artifacts(
             &p1,
+            "return 1",
             &LuaValue::Nil,
             o1,
             vec![],
@@ -342,6 +592,7 @@ return 1"#;
         let (p2, o2) = run_program(source);
         let a2 = build_proof_artifacts(
             &p2,
+            source,
             &LuaValue::Nil,
             o2,
             vec![],
@@ -361,6 +612,7 @@ return 1"#;
         let (program, output) = run_program("return 42");
         let mut artifacts = build_proof_artifacts(
             &program,
+            "src",
             &LuaValue::Nil,
             output,
             vec![],
@@ -437,6 +689,7 @@ return 1"#;
         let (program, output) = run_program("return 1 + 2");
         let artifacts = build_proof_artifacts_with_noir(
             &program,
+            "return 1 + 2",
             &LuaValue::Nil,
             output,
             vec![],

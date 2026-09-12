@@ -279,6 +279,25 @@ pub fn execute<H: HostInterface>(
     })
 }
 
+/// Execute under an `OraclePolicy`, which is enforced during the run.
+///
+/// Policy violations surface as ordinary runtime errors, so the orchestrator's
+/// retry loop feeds them back to the LLM like any other failure — a program
+/// that hits a disallowed domain gets a chance to be regenerated.
+pub fn execute_with_policy<H: HostInterface>(
+    program: &CompiledProgram,
+    input: LuaValue,
+    config: VmConfig,
+    host: H,
+    policy: proveno::policy::OraclePolicy,
+) -> Result<VmOutput, PipelineError> {
+    let mut vm = Vm::new_with_policy(config, host, policy);
+    vm.execute(program, input).map_err(|e| {
+        let msg = format_vm_error(&e);
+        PipelineError::Runtime(msg, e)
+    })
+}
+
 /// Format a VmError into a human-readable string for LLM feedback.
 pub fn format_vm_error(err: &VmError) -> String {
     match err {
@@ -961,6 +980,80 @@ return time_string
         assert!(
             result.is_err(),
             "should return error for unsupported format specifier"
+        );
+    }
+}
+
+#[cfg(test)]
+mod policy_execution_tests {
+    use super::*;
+    use crate::tools::StubHost;
+    use proveno::policy::{OraclePolicy, TlsRequirement};
+    use std::collections::HashMap;
+
+    fn policy_allowing(domains: &[&str]) -> OraclePolicy {
+        OraclePolicy {
+            allowed_domains: domains.iter().map(|d| d.to_string()).collect(),
+            allowed_http_methods: vec!["http_get".into()],
+            max_tool_calls: 4,
+            max_payload_bytes_per_call: 65536,
+            tls_requirement: TlsRequirement::UnattestedPermitted,
+            required_output_schema: None,
+            schema_versions: HashMap::new(),
+        }
+    }
+
+    fn program(src: &str) -> CompiledProgram {
+        compile_and_verify(src).unwrap()
+    }
+
+    /// A program that touches nothing the policy restricts runs normally.
+    #[test]
+    fn execute_with_policy_allows_unrestricted_program() {
+        let out = execute_with_policy(
+            &program("return 1 + 2"),
+            LuaValue::Nil,
+            VmConfig::default(),
+            StubHost,
+            policy_allowing(&["api.coingecko.com"]),
+        )
+        .unwrap();
+        assert_eq!(out.return_value, LuaValue::Integer(3));
+    }
+
+    /// The point of attaching a policy: a disallowed domain stops the run, and
+    /// it surfaces as a Runtime error so the orchestrator's retry loop can feed
+    /// it back to the LLM.
+    #[test]
+    fn execute_with_policy_blocks_disallowed_domain() {
+        let err = execute_with_policy(
+            &program(
+                r#"local r = tool.call("http_get", { url = "https://evil.example/" }) return 0"#,
+            ),
+            LuaValue::Nil,
+            VmConfig::default(),
+            StubHost,
+            policy_allowing(&["api.coingecko.com"]),
+        )
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("policy") && msg.contains("evil.example"),
+            "expected a policy rejection naming the domain, got: {msg}"
+        );
+        assert!(matches!(err, PipelineError::Runtime(..)));
+    }
+
+    /// Without a policy the same program is not blocked, so the rejection above
+    /// is attributable to the policy rather than to the host.
+    #[test]
+    fn same_program_is_not_blocked_without_a_policy() {
+        let src = r#"local r = tool.call("http_get", { url = "https://evil.example/" }) return 0"#;
+        let err = execute(&program(src), LuaValue::Nil, VmConfig::default(), StubHost).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            !msg.contains("policy"),
+            "unexpected policy rejection: {msg}"
         );
     }
 }

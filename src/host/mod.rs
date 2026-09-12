@@ -1,4 +1,6 @@
 pub mod canonicalize;
+pub mod policy_host;
+#[cfg(feature = "poseidon")]
 pub mod poseidon2;
 pub mod tape;
 pub mod tool_registry;
@@ -7,6 +9,8 @@ pub mod transcript;
 pub use canonicalize::{
     CanonError, canonical_byte_len, canonical_serialize, canonical_serialize_table,
 };
+pub use policy_host::PolicyEnforcingHost;
+#[cfg(feature = "poseidon")]
 pub use poseidon2::{
     bytes_to_fields, field_to_be_bytes32, i64_to_field, poseidon2_hash, u8_to_field, u32_to_field,
 };

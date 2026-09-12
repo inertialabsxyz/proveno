@@ -467,6 +467,7 @@ fn tape_exhausted_returns_error() {
     }
 }
 
+#[cfg(feature = "poseidon")]
 #[test]
 fn tape_commitment_hash_matches_between_runs() {
     let src = r#"
@@ -489,6 +490,61 @@ fn tape_commitment_hash_matches_between_runs() {
     assert_eq!(tape1.commitment_hash(), tape2.commitment_hash());
 }
 
+#[test]
+fn tape_commitment_hash_sha256_matches_between_runs() {
+    let src = r#"
+        local r = tool.call("tool", {x = 1})
+        return r.result
+    "#;
+
+    let mut host1 = MockHost::new();
+    host1.add_ok("tool", make_simple_response());
+    let out1 = run_with_host(src, host1, VmConfig::default()).unwrap();
+
+    let mut host2 = MockHost::new();
+    host2.add_ok("tool", make_simple_response());
+    let out2 = run_with_host(src, host2, VmConfig::default()).unwrap();
+
+    let tape1 = OracleTape::from_records(&out1.transcript);
+    let tape2 = OracleTape::from_records(&out2.transcript);
+
+    // Same determinism invariant as the Poseidon2 scheme: two identical dry
+    // runs must commit identically, or zkVM replay proofs are unsound.
+    assert_eq!(
+        tape1.commitment_hash_sha256(),
+        tape2.commitment_hash_sha256()
+    );
+    assert_eq!(
+        tape1.attestation_commitment_sha256(),
+        tape2.attestation_commitment_sha256()
+    );
+}
+
+#[test]
+fn tape_commitment_hash_sha256_differs_for_different_responses() {
+    let src = r#"
+        local r = tool.call("tool", {})
+        return r.result
+    "#;
+
+    let mut host_a = MockHost::new();
+    host_a.add_ok("tool", make_response("result", LuaValue::Integer(1)));
+    let out_a = run_with_host(src, host_a, VmConfig::default()).unwrap();
+
+    let mut host_b = MockHost::new();
+    host_b.add_ok("tool", make_response("result", LuaValue::Integer(2)));
+    let out_b = run_with_host(src, host_b, VmConfig::default()).unwrap();
+
+    let tape_a = OracleTape::from_records(&out_a.transcript);
+    let tape_b = OracleTape::from_records(&out_b.transcript);
+
+    assert_ne!(
+        tape_a.commitment_hash_sha256(),
+        tape_b.commitment_hash_sha256()
+    );
+}
+
+#[cfg(feature = "poseidon")]
 #[test]
 fn tape_commitment_hash_differs_for_different_responses() {
     let src = r#"

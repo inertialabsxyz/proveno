@@ -1,4 +1,4 @@
-.PHONY: check lint test test-prove fix build dev act help
+.PHONY: check lint test test-nostd test-prove build-openvm prove-openvm prove-examples fix build dev act help
 
 help:
 	@echo "Usage: make <target>"
@@ -9,12 +9,16 @@ help:
 	@echo "  test           all tests: unit + integration"
 	@echo "  test-unit      unit tests only (cargo test --lib)"
 	@echo "  test-int       integration tests only (cargo test --tests)"
+	@echo "  test-nostd     no_std + no-poseidon builds (zkVM guest configurations)"
 	@echo "  test-prove     Noir nargo+bb prove/verify pipeline (slow; pre-PR gate)"
+	@echo "  build-openvm   build + transpile the OpenVM guest (needs cargo-openvm)"
+	@echo "  prove-openvm   full OpenVM pipeline on examples/simple.lua: compile -> prove -> verify"
+	@echo "  prove-examples run every examples/*.lua through the OpenVM pipeline"
 	@echo "  fix            auto-format + apply safe clippy fixes"
 	@echo "  build          cargo build"
 
 # CI target — must pass before merging
-check: lint test
+check: lint test test-nostd
 
 # Format check + clippy (warnings are errors)
 lint:
@@ -32,6 +36,50 @@ test-unit:
 # Integration tests only
 test-integration:
 	cargo test --tests
+
+# The feature configurations a zkVM guest builds under. `poseidon` pulls in
+# wasmer -> cranelift -> target-lexicon, whose build script rejects custom
+# RISC-V target triples, so the guest must compile without it. Warnings are
+# errors here: an unused import under one feature set is a real defect.
+#
+# These are builds, not test runs — the point is that the configurations
+# compile at all. `test` already runs the suite under default features.
+test-nostd:
+	RUSTFLAGS="-D warnings" cargo build -p proveno --no-default-features
+	RUSTFLAGS="-D warnings" cargo build -p proveno --no-default-features --features zkvm
+	RUSTFLAGS="-D warnings" cargo build -p proveno --no-default-features --features "std,zkvm"
+	cargo test -p proveno --no-default-features --features "std,zkvm"
+
+# Build and transpile the OpenVM guest for riscv32im-risc0-zkvm-elf.
+#
+# Not part of `make check`: it needs the cargo-openvm CLI and the pinned
+# nightly toolchain. `make test-nostd` already covers the feature
+# configurations this depends on, which is what actually breaks.
+#
+# To execute the guest and see it reveal proveno's SHA-256 tape commitment:
+#   cargo openvm run -p proveno-openvm --input 0x010a00000000000000
+build-openvm:
+	cargo openvm build -p proveno-openvm
+
+# End-to-end OpenVM proof of examples/simple.lua.
+#
+# compile -> dry run -> guest input -> app proof -> verify. Prints the expected
+# journal digest before proving; the guest reveals exactly that value.
+#
+# Needs cargo-openvm and a one-off `cargo openvm keygen --app-only` (writes
+# openvm/app.pk and openvm/app.vk, both gitignored). Not part of `make check`.
+prove-openvm:
+	cargo run -q -p proveno-compiler -- examples/simple.lua target/openvm-demo.compiled.json
+	cargo run -q -p proveno-witness -- target/openvm-demo.compiled.json target/openvm-demo.dry.json
+	cargo run -q -p proveno-openvm-host -- \
+		target/openvm-demo.compiled.json target/openvm-demo.dry.json \
+		--out target/openvm-demo.input.json --prove
+
+# Run every examples/*.lua through compile -> dry run -> prove -> verify and
+# report which stage each one reaches. Makes live HTTP calls (several examples
+# fetch real price data), so it needs network. Not part of `make check`.
+prove-examples:
+	./prove-examples.sh
 
 # Noir prove/verify pipeline (nargo execute + bb write_vk/prove/verify).
 # Slow (~30 s); not part of `make test`. Required pre-PR gate when touching

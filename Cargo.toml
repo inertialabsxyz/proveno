@@ -4,13 +4,35 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["proveno-compiler", "proveno-orchestrator","proveno-witness","verifier","proveno-noir","proveno-demo"]
+members = ["proveno-compiler", "proveno-orchestrator","proveno-witness","verifier","proveno-noir","proveno-demo","proveno-openvm","proveno-openvm-host"]
 resolver = "2"
 
 [features]
-default = ["std"]
+default = ["std", "poseidon", "tls"]
 std = ["dep:serde_json"]
 zkvm = []
+
+# BN254 Poseidon2 commitments, byte-identical to what the Noir circuit
+# recomputes. Required by the Noir proving path (`proveno-noir`, `make test-prove`).
+#
+# Pulls in the noir-lang acir ecosystem and, through bn254_blackbox_solver,
+# wasmer + cranelift. cranelift 0.91 pins target-lexicon 0.12, whose build
+# script hard-panics on target triples it does not recognise, including the
+# custom RISC-V triples zkVM toolchains use. Leave this off for zkVM guest
+# builds and use the SHA-256 commitment scheme instead
+# (`OracleTape::commitment_hash_sha256`, `compute_public_inputs_sha256`).
+poseidon = ["dep:acir", "dep:bn254_blackbox_solver"]
+
+# TLS attestation producer. Commits over Poseidon2 to match the circuit, so it
+# implies `poseidon`; also carries the cert-chain verification stack.
+tls = [
+    "poseidon",
+    "dep:p256",
+    "dep:p384",
+    "dep:x509-cert",
+    "dep:webpki-roots",
+    "dep:rsa",
+]
 
 [dependencies]
 sha2 = { version = "0.10", default-features = false, features = ["oid"] }
@@ -19,17 +41,15 @@ sha2 = { version = "0.10", default-features = false, features = ["oid"] }
 sha3 = { version = "0.10", default-features = false }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
-p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-p384 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-x509-cert = { version = "0.2", default-features = false }
-webpki-roots = { version = "0.26" }
+p256 = { optional = true, version = "0.13", default-features = false, features = ["ecdsa"] }
+p384 = { optional = true, version = "0.13", default-features = false, features = ["ecdsa"] }
+x509-cert = { optional = true, version = "0.2", default-features = false }
+webpki-roots = { optional = true, version = "0.26" }
 # RSA signature verification for cert chains where intermediate/root CAs use RSA
-rsa = { version = "0.9", default-features = false }
-# Poseidon2 hashing for Noir-circuit-friendly commitments.
-# Pulls in the noir-lang acir/acvm ecosystem; this breaks no_std/zkvm builds
-# (OpenVM is out of scope for the current migration).
-acir = "0.46"
-bn254_blackbox_solver = "0.46"
+rsa = { version = "0.9", default-features = false, optional = true }
+# Poseidon2 hashing for Noir-circuit-friendly commitments (see `poseidon` feature).
+acir = { version = "0.46", optional = true }
+bn254_blackbox_solver = { version = "0.46", optional = true }
 
 [dev-dependencies]
 serde_json = "1"

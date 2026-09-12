@@ -76,8 +76,142 @@ impl HostInterface for ProverHost {
             }
             // fail: always errors
             "fail" => return Err("this tool always fails".into()),
+            // time_now: real clock. Deterministic replay is not at risk — the
+            // dry run records the timestamp on the oracle tape, and the guest
+            // replays that recorded value rather than reading a clock.
+            "time_now" => {
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|e| format!("time_now: {e}"))?
+                    .as_secs() as i64;
+                resp.rawset(str_key("timestamp"), LuaValue::Integer(ts))
+                    .unwrap();
+            }
+            // echo / add / upper mirror the demo tools in src/main.rs and the
+            // orchestrator's StubHost, response shapes included, so the example
+            // programs run unchanged through the proving pipeline.
+            "echo" => {
+                let msg = args
+                    .get(&str_key("message"))
+                    .cloned()
+                    .unwrap_or(LuaValue::Nil);
+                resp.rawset(str_key("message"), msg).unwrap();
+            }
+            "add" => {
+                let a = match args.get(&str_key("a")) {
+                    Some(LuaValue::Integer(n)) => *n,
+                    _ => return Err("add: expected integer arg 'a'".into()),
+                };
+                let b = match args.get(&str_key("b")) {
+                    Some(LuaValue::Integer(n)) => *n,
+                    _ => return Err("add: expected integer arg 'b'".into()),
+                };
+                resp.rawset(str_key("result"), LuaValue::Integer(a + b))
+                    .unwrap();
+            }
+            "upper" => {
+                let text = match args.get(&str_key("text")) {
+                    Some(LuaValue::String(s)) => {
+                        String::from_utf8_lossy(s.as_bytes()).to_uppercase()
+                    }
+                    _ => return Err("upper: expected string arg 'text'".into()),
+                };
+                resp.rawset(
+                    str_key("result"),
+                    LuaValue::String(LuaString::from_str(&text)),
+                )
+                .unwrap();
+            }
             other => return Err(format!("unknown tool '{other}'")),
         }
         Ok(resp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args_of(pairs: &[(&str, LuaValue)]) -> LuaTable {
+        let mut t = LuaTable::new();
+        for (k, v) in pairs {
+            t.rawset(str_key(k), v.clone()).unwrap();
+        }
+        t
+    }
+
+    fn call(name: &str, args: LuaTable) -> Result<LuaTable, String> {
+        ProverHost::new().call_tool(name, &args)
+    }
+
+    #[test]
+    fn echo_returns_the_message() {
+        let r = call(
+            "echo",
+            args_of(&[("message", LuaValue::String(LuaString::from_str("hi")))]),
+        )
+        .unwrap();
+        assert_eq!(
+            r.get(&str_key("message")),
+            Some(&LuaValue::String(LuaString::from_str("hi")))
+        );
+    }
+
+    #[test]
+    fn add_sums_integers() {
+        let r = call(
+            "add",
+            args_of(&[("a", LuaValue::Integer(17)), ("b", LuaValue::Integer(25))]),
+        )
+        .unwrap();
+        assert_eq!(r.get(&str_key("result")), Some(&LuaValue::Integer(42)));
+    }
+
+    #[test]
+    fn add_rejects_non_integer_args() {
+        let err = call(
+            "add",
+            args_of(&[
+                ("a", LuaValue::String(LuaString::from_str("x"))),
+                ("b", LuaValue::Integer(1)),
+            ]),
+        )
+        .unwrap_err();
+        assert!(err.contains("expected integer"), "got: {err}");
+    }
+
+    #[test]
+    fn upper_uppercases_text() {
+        let r = call(
+            "upper",
+            args_of(&[("text", LuaValue::String(LuaString::from_str("lua")))]),
+        )
+        .unwrap();
+        assert_eq!(
+            r.get(&str_key("result")),
+            Some(&LuaValue::String(LuaString::from_str("LUA")))
+        );
+    }
+
+    #[test]
+    fn time_now_returns_a_plausible_timestamp() {
+        let r = call("time_now", LuaTable::new()).unwrap();
+        match r.get(&str_key("timestamp")) {
+            // Later than 2024-01-01; pins that it is a real clock reading and
+            // not a zero or a stub constant.
+            Some(LuaValue::Integer(ts)) => assert!(*ts > 1_704_067_200, "got {ts}"),
+            other => panic!("expected integer timestamp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fail_always_errors() {
+        assert!(call("fail", LuaTable::new()).is_err());
+    }
+
+    #[test]
+    fn unknown_tool_is_reported_by_name() {
+        let err = call("nope", LuaTable::new()).unwrap_err();
+        assert!(err.contains("unknown tool 'nope'"), "got: {err}");
     }
 }

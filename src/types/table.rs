@@ -1,5 +1,5 @@
 use crate::types::value::{LuaError, LuaString, LuaValue, MAX_TABLE_ENTRIES};
-use std::collections::BTreeMap;
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 //
 // | Key Type  | Order                        |

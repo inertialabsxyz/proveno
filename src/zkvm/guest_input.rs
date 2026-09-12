@@ -68,10 +68,21 @@ impl GuestInput {
     ///
     /// `policy_hash` is SHA-256 of [`Self::policy_canonical`], matching
     /// `OraclePolicy::policy_hash` byte for byte, and is all-zero when no
-    /// policy is attached. This **binds** the policy document, it does not
-    /// verify compliance: the policy is enforced host-side during the dry run
-    /// via `ToolRegistry::with_policy`, and the guest does not re-check it.
-    /// Same boundary as `attestation_hash`.
+    /// policy is attached. Unlike `attestation_hash`, this is not bind-only:
+    /// the enforceable fields are parsed out of the *same* buffer that gets
+    /// hashed (see [`PolicyView::parse`]) and enforced during the replay by
+    /// [`PolicyEnforcingHost`], so an execution that violates the policy
+    /// cannot be replayed and therefore cannot be proved. Editing the bytes
+    /// moves the committed hash and the enforced rules together.
+    ///
+    /// Enforced in-guest: HTTP method restriction, domain allowlist,
+    /// `max_tool_calls` (a rejected call still consumes budget), and
+    /// `max_payload_bytes_per_call` via [`Self::check_tape_payload_sizes`]
+    /// before replay starts. Still bind-only, because they need `serde_json`:
+    /// `required_output_schema` and `schema_versions`, which stay host-side in
+    /// `ToolRegistry::with_policy`. `tls_requirement` is parsed but not acted
+    /// on, for the same reason `attestation_hash` is bind-only — the guest has
+    /// no way to authenticate a provider blob.
     ///
     /// Not bound: [`VmConfig`]. The prover picks the gas and memory limits,
     /// which decide whether execution completes or aborts. Committing to the

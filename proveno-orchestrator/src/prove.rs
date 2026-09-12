@@ -16,6 +16,12 @@ use proveno_witness::prover::DryRunResult;
 
 /// Paths and public inputs produced by `build_proof_artifacts`.
 pub struct ProveArtifacts {
+    /// The Lua source the proof is about.
+    ///
+    /// Written alongside the other artifacts because a proof of a program you
+    /// no longer have is not much use: `compiled.json` holds bytecode, not
+    /// something a human can read or recompile from.
+    pub source_path: PathBuf,
     pub compiled_path: PathBuf,
     pub dry_result_path: PathBuf,
     pub public_inputs: PublicInputs,
@@ -57,6 +63,7 @@ pub struct NoirProveSummary {
 /// not available.
 pub fn build_proof_artifacts(
     program: &CompiledProgram,
+    source: &str,
     input: &LuaValue,
     output: VmOutput,
     tls_attestations: Vec<TlsAttestationRecord>,
@@ -80,6 +87,12 @@ pub fn build_proof_artifacts(
     fs::create_dir_all(output_dir)
         .map_err(|e| format!("failed to create output directory: {e}"))?;
 
+    // The generated program itself. For an LLM-authored task this is the only
+    // human-readable record of what was proven.
+    let source_path = PathBuf::from(output_dir).join("program.lua");
+    fs::write(&source_path, source)
+        .map_err(|e| format!("failed to write {}: {e}", source_path.display()))?;
+
     // Serialize compiled program
     let compiled_path = PathBuf::from(output_dir).join("compiled.json");
     let compiled_json = serde_json::to_string_pretty(program)
@@ -95,6 +108,7 @@ pub fn build_proof_artifacts(
         .map_err(|e| format!("failed to write {}: {e}", dry_result_path.display()))?;
 
     Ok(ProveArtifacts {
+        source_path,
         compiled_path,
         dry_result_path,
         public_inputs,
@@ -138,6 +152,19 @@ fn openvm_host_command(args: Vec<String>) -> (String, Vec<String>) {
     ("cargo".into(), fallback)
 }
 
+/// Backend-specific options for [`build_proof_artifacts_with_openvm`].
+///
+/// Grouped rather than passed positionally: with the source added this was
+/// eight arguments, four of them strings, which is easy to transpose at a call
+/// site and impossible to catch by type.
+pub struct OpenVmOptions<'a> {
+    pub output_dir: &'a str,
+    /// `app` or `stark`.
+    pub level: &'a str,
+    /// Must be the policy the execution actually ran under.
+    pub policy_spec: Option<&'a str>,
+}
+
 /// Same as `build_proof_artifacts`, but proves with the OpenVM backend.
 ///
 /// Shells out to `proveno-openvm-host` over the artifacts just written, the
@@ -149,15 +176,19 @@ fn openvm_host_command(args: Vec<String>) -> (String, Vec<String>) {
 /// commits to a policy the program was not actually constrained by.
 pub fn build_proof_artifacts_with_openvm(
     program: &CompiledProgram,
+    source: &str,
     input: &LuaValue,
     output: VmOutput,
     tls_attestations: Vec<TlsAttestationRecord>,
-    output_dir: &str,
-    level: &str,
-    policy_spec: Option<&str>,
+    opts: OpenVmOptions<'_>,
 ) -> Result<ProveArtifacts, String> {
+    let OpenVmOptions {
+        output_dir,
+        level,
+        policy_spec,
+    } = opts;
     let mut artifacts =
-        build_proof_artifacts(program, input, output, tls_attestations, output_dir)?;
+        build_proof_artifacts(program, source, input, output, tls_attestations, output_dir)?;
 
     let proof_path = PathBuf::from(output_dir).join(format!("openvm.{level}.proof"));
     let input_path = PathBuf::from(output_dir).join("openvm_input.json");
@@ -256,6 +287,7 @@ pub fn build_proof_artifacts_with_openvm(
 /// verify flag. Verification is always attempted.
 pub fn build_proof_artifacts_with_noir(
     program: &CompiledProgram,
+    source: &str,
     input: &LuaValue,
     output: VmOutput,
     tls_attestations: Vec<TlsAttestationRecord>,
@@ -263,7 +295,7 @@ pub fn build_proof_artifacts_with_noir(
     circuit_dir: &Path,
 ) -> Result<ProveArtifacts, String> {
     let mut artifacts =
-        build_proof_artifacts(program, input, output, tls_attestations, output_dir)?;
+        build_proof_artifacts(program, source, input, output, tls_attestations, output_dir)?;
 
     // Reconstruct the `DryRunResult` from the freshly written JSON so we
     // share the exact bytes the standalone proveno-noir CLI would consume.
@@ -373,6 +405,10 @@ pub fn format_prove_section(artifacts: &ProveArtifacts) -> String {
     ));
     out.push('\n');
     out.push_str(&format!(
+        "  Program source:   {}\n",
+        artifacts.source_path.display()
+    ));
+    out.push_str(&format!(
         "  Compiled program: {}\n",
         artifacts.compiled_path.display()
     ));
@@ -478,8 +514,24 @@ mod tests {
         let dir_str = dir.path().to_str().unwrap();
 
         let (program, output) = run_program("return 42");
-        let artifacts =
-            build_proof_artifacts(&program, &LuaValue::Nil, output, vec![], dir_str).unwrap();
+        let artifacts = build_proof_artifacts(
+            &program,
+            "return 42",
+            &LuaValue::Nil,
+            output,
+            vec![],
+            dir_str,
+        )
+        .unwrap();
+
+        // The generated source is written verbatim next to the artifacts. A
+        // proof of a program nobody kept a copy of is of limited use.
+        assert!(artifacts.source_path.exists());
+        assert_eq!(
+            std::fs::read_to_string(&artifacts.source_path).unwrap(),
+            "return 42"
+        );
+        assert_eq!(artifacts.source_path.file_name().unwrap(), "program.lua");
 
         // Files exist and are valid JSON
         assert!(artifacts.compiled_path.exists());
@@ -503,8 +555,15 @@ local r2 = tool.call("add", {a = 1, b = 2})
 return r1.message
 "#;
         let (program, output) = run_program(source);
-        let artifacts =
-            build_proof_artifacts(&program, &LuaValue::Nil, output, vec![], dir_str).unwrap();
+        let artifacts = build_proof_artifacts(
+            &program,
+            "return 42",
+            &LuaValue::Nil,
+            output,
+            vec![],
+            dir_str,
+        )
+        .unwrap();
 
         // Deserialize and check oracle tape
         let dry_json = fs::read_to_string(&artifacts.dry_result_path).unwrap();
@@ -520,6 +579,7 @@ return r1.message
         let (p1, o1) = run_program("return 1");
         let a1 = build_proof_artifacts(
             &p1,
+            "return 1",
             &LuaValue::Nil,
             o1,
             vec![],
@@ -532,6 +592,7 @@ return 1"#;
         let (p2, o2) = run_program(source);
         let a2 = build_proof_artifacts(
             &p2,
+            source,
             &LuaValue::Nil,
             o2,
             vec![],
@@ -551,6 +612,7 @@ return 1"#;
         let (program, output) = run_program("return 42");
         let mut artifacts = build_proof_artifacts(
             &program,
+            "src",
             &LuaValue::Nil,
             output,
             vec![],
@@ -627,6 +689,7 @@ return 1"#;
         let (program, output) = run_program("return 1 + 2");
         let artifacts = build_proof_artifacts_with_noir(
             &program,
+            "return 1 + 2",
             &LuaValue::Nil,
             output,
             vec![],

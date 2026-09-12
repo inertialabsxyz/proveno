@@ -323,15 +323,19 @@ fn main() {
             let artifacts = match cli.backend.as_str() {
                 "openvm" => prove::build_proof_artifacts_with_openvm(
                     &program,
+                    &source,
                     &LuaValue::Nil,
                     output.clone(),
                     vec![],
-                    &cli.prove_output,
-                    &cli.openvm_level,
-                    cli.policy.as_deref(),
+                    prove::OpenVmOptions {
+                        output_dir: &cli.prove_output,
+                        level: &cli.openvm_level,
+                        policy_spec: cli.policy.as_deref(),
+                    },
                 ),
                 "noir" => prove::build_proof_artifacts_with_noir(
                     &program,
+                    &source,
                     &LuaValue::Nil,
                     output.clone(),
                     vec![],

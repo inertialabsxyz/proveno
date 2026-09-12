@@ -33,12 +33,15 @@ fn run(src: &str, policy: Option<&str>) -> prove::ProveArtifacts {
     ));
     prove::build_proof_artifacts_with_openvm(
         &program,
+        src,
         &LuaValue::Nil,
         output,
         vec![],
-        dir.to_str().unwrap(),
-        "app",
-        policy,
+        prove::OpenVmOptions {
+            output_dir: dir.to_str().unwrap(),
+            level: "app",
+            policy_spec: policy,
+        },
     )
     .expect("openvm proving succeeds")
 }
@@ -53,6 +56,14 @@ fn openvm_backend_proves_and_verifies() {
     assert!(ov.verified, "proof did not verify");
     assert_eq!(ov.digest.len(), 64, "digest should be 32 bytes of hex");
     assert!(ov.proof_path.is_file(), "proof file was not written");
+    assert!(
+        artifacts.source_path.is_file(),
+        "program.lua was not written"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&artifacts.source_path).unwrap(),
+        "return 1 + 2"
+    );
     assert!(artifacts.compiled_path.is_file());
     assert!(artifacts.dry_result_path.is_file());
 }

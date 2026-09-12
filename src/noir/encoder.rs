@@ -227,6 +227,46 @@ mod tests {
         assert_ne!(a, b);
     }
 
+    /// Upvalue descriptors must reach the hash. These two programs compile to
+    /// byte-identical instruction streams *and* identical constant pools — the
+    /// only difference anywhere is prototype 1's `upvalues`, which is
+    /// `[Local(0)]` in one and `[Local(1)]` in the other. A hash that skipped
+    /// the descriptors would let a prover repoint a closure at a different
+    /// captured local (here: return 20 instead of 10) under the committed
+    /// program hash.
+    #[test]
+    fn sha256_hash_distinguishes_upvalue_descriptors() {
+        let a = compile_lua("local a = 10 local b = 20 local function f() return a end return f()");
+        let b = compile_lua("local a = 10 local b = 20 local function f() return b end return f()");
+
+        // Pin the premise: nothing but the upvalue descriptor differs.
+        assert_eq!(a.prototypes.len(), b.prototypes.len());
+        for (pa, pb) in a.prototypes.iter().zip(&b.prototypes) {
+            assert_eq!(pa.code, pb.code);
+            assert_eq!(pa.constants, pb.constants);
+        }
+        assert_ne!(a.prototypes[1].upvalues, b.prototypes[1].upvalues);
+
+        assert_ne!(
+            compute_program_hash_sha256(&a.prototypes),
+            compute_program_hash_sha256(&b.prototypes)
+        );
+    }
+
+    /// Prototype metadata (`param_count` / `local_count` / `upvalue_count`)
+    /// must reach the hash too: arity decides how the VM binds arguments to
+    /// slots, and these two bodies compile to the same instructions.
+    #[test]
+    fn sha256_hash_distinguishes_prototype_arity() {
+        let a = compile_lua("local function f(x) return 1 end return f(7)");
+        let b = compile_lua("local function f(x, y) return 1 end return f(7)");
+        assert_ne!(a.prototypes[1].param_count, b.prototypes[1].param_count);
+        assert_ne!(
+            compute_program_hash_sha256(&a.prototypes),
+            compute_program_hash_sha256(&b.prototypes)
+        );
+    }
+
     #[test]
     fn sha256_hash_is_stable_across_compilations() {
         let a = compute_program_hash_sha256(&compile_lua("return 1 + 2").prototypes);

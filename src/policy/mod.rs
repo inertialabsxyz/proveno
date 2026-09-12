@@ -6,28 +6,29 @@
 //!
 //! See `docs/canonical-serialization.md` for the byte-exact hash format.
 
+pub mod canonical;
+
+/// The `no_std` half of the policy, shared with the zkVM guest.
+///
+/// `TlsRequirement` and `extract_domain` live in [`canonical`] so a guest can
+/// use them without `std`; they are re-exported here so host code can keep
+/// referring to `policy::TlsRequirement`.
+pub use canonical::{PolicyParseError, PolicyView, TlsRequirement, extract_domain, is_http_tool};
+
+#[cfg(feature = "std")]
 pub mod profiles;
 
+#[cfg(feature = "std")]
 use sha2::{Digest, Sha256};
+#[cfg(feature = "std")]
 use std::collections::HashMap;
-
-/// TLS enforcement requirement for HTTPS tool calls.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum TlsRequirement {
-    /// Every HTTPS response must carry a P-256 ECDSA-verified attestation.
-    RequiredAttested,
-    /// HTTPS responses should be attested; unattested calls are allowed but flagged.
-    PreferredAttested,
-    /// TLS attestation is not required.
-    UnattestedPermitted,
-}
 
 /// Defines admissibility for one oracle execution.
 ///
 /// An execution is *policy-approved* only when every tool call satisfies
 /// the constraints below. The `policy_hash()` commits to this document so
 /// a verifier can point to a single hash and know exactly what was allowed.
+#[cfg(feature = "std")]
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OraclePolicy {
@@ -63,6 +64,7 @@ pub struct OraclePolicy {
     pub schema_versions: HashMap<String, serde_json::Value>,
 }
 
+#[cfg(feature = "std")]
 impl OraclePolicy {
     /// Parse a policy from JSON.
     ///
@@ -242,25 +244,12 @@ impl OraclePolicy {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-/// Extract the hostname from a URL string (no port, no path).
-///
-/// `"https://api.example.com/v1/price"` → `"api.example.com"`
-pub fn extract_domain(url: &str) -> Option<&str> {
-    let rest = if let Some(idx) = url.find("://") {
-        &url[idx + 3..]
-    } else {
-        url
-    };
-    let rest = rest.split('/').next().unwrap_or(rest);
-    let host = rest.split(':').next().unwrap_or(rest);
-    if host.is_empty() { None } else { Some(host) }
-}
-
 /// Check whether `actual` satisfies `schema`.
 ///
 /// Each key in a schema object must be present in `actual` with a value of
 /// the same JSON type. `null` in the schema accepts any value.
 /// Extra keys in `actual` are permitted.
+#[cfg(feature = "std")]
 fn schema_matches(schema: &serde_json::Value, actual: &serde_json::Value) -> bool {
     match schema {
         serde_json::Value::Null => true,
@@ -294,10 +283,12 @@ fn schema_matches(schema: &serde_json::Value, actual: &serde_json::Value) -> boo
 ///
 /// Object keys are sorted lexicographically. The output is compact (no whitespace).
 /// This produces the same bytes on any machine for the same value.
+#[cfg(feature = "std")]
 fn canonical_json_bytes(v: &serde_json::Value) -> Vec<u8> {
     canonical_json_write(v).into_bytes()
 }
 
+#[cfg(feature = "std")]
 fn canonical_json_write(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::Null => "null".to_owned(),
@@ -328,7 +319,7 @@ fn canonical_json_write(v: &serde_json::Value) -> String {
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
 

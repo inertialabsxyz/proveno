@@ -8,8 +8,12 @@ use alloc::{string::String, vec::Vec};
 
 use crate::{
     compiler::proto::CompiledProgram,
-    host::tape::{OracleTape, TapeHost},
+    host::{
+        policy_host::PolicyEnforcingHost,
+        tape::{OracleTape, TapeEntry, TapeHost},
+    },
     noir::encoder::compute_program_hash_sha256,
+    policy::canonical::PolicyView,
     types::value::LuaValue,
     vm::{
         engine::{Vm, VmConfig, VmOutput},
@@ -74,12 +78,27 @@ impl GuestInput {
     /// config is follow-on work.
     pub fn replay_public_inputs(&self) -> Result<(VmOutput, PublicInputs), VmError> {
         let program_hash = compute_program_hash_sha256(&self.program.prototypes);
-        let mut vm = Vm::new(self.config.clone(), TapeHost::new(self.oracle_tape.clone()));
-        let output = vm.execute(&self.program, self.input_value.clone())?;
-        let policy_hash = if self.policy_canonical.is_empty() {
-            [0u8; 32]
+
+        let (output, policy_hash) = if self.policy_canonical.is_empty() {
+            let tape = TapeHost::new(self.oracle_tape.clone());
+            let mut vm = Vm::new(self.config.clone(), tape);
+            (
+                vm.execute(&self.program, self.input_value.clone())?,
+                [0u8; 32],
+            )
         } else {
-            Sha256::digest(&self.policy_canonical).into()
+            // Parsed from the same bytes that get hashed below, so the policy
+            // enforced and the policy committed are the same document by
+            // construction rather than by convention.
+            let view = PolicyView::parse(&self.policy_canonical).map_err(|e| {
+                VmError::ToolError(alloc::format!("policy: unparsable canonical bytes: {e}"))
+            })?;
+            self.check_tape_payload_sizes(&view)?;
+
+            let host = PolicyEnforcingHost::new(TapeHost::new(self.oracle_tape.clone()), view);
+            let mut vm = Vm::new(self.config.clone(), host);
+            let output = vm.execute(&self.program, self.input_value.clone())?;
+            (output, Sha256::digest(&self.policy_canonical).into())
         };
         let public_inputs = compute_public_inputs_sha256_with_policy_hash(
             program_hash,
@@ -106,6 +125,29 @@ impl GuestInput {
             tool_names,
             policy_canonical: Vec::new(),
         }
+    }
+
+    /// Reject a tape carrying a response larger than the policy allows.
+    ///
+    /// Checked against the tape rather than inside the enforcing host because
+    /// the tape entries already *are* the canonical response bytes: measuring
+    /// them here is a length read, whereas doing it per call would mean
+    /// re-serializing each response inside the guest for nothing.
+    fn check_tape_payload_sizes(&self, policy: &PolicyView<'_>) -> Result<(), VmError> {
+        let cap = policy.max_payload_bytes_per_call as usize;
+        for (i, entry) in self.oracle_tape.entries.iter().enumerate() {
+            let len = match entry {
+                TapeEntry::Ok(bytes) => bytes.len(),
+                TapeEntry::Err(msg) => msg.len(),
+            };
+            if len > cap {
+                return Err(VmError::ToolError(alloc::format!(
+                    "policy: tool call {i} response is {len} bytes, over the \
+                     max_payload_bytes_per_call limit of {cap}"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Attach the policy whose `canonical_bytes()` these are.
@@ -209,25 +251,162 @@ mod tests {
         assert_ne!(pa.digest_sha256(), pb.digest_sha256());
     }
 
-    /// A prover editing the policy bytes cannot keep the old hash, because the
-    /// guest derives the hash from the bytes rather than accepting one.
+    // ── Guest-side policy enforcement ────────────────────────────────────────
+
+    #[cfg(feature = "std")]
+    fn policy_for(domains: &[&str], max_calls: usize) -> crate::policy::OraclePolicy {
+        crate::policy::OraclePolicy {
+            allowed_domains: domains.iter().map(|d| (*d).into()).collect(),
+            allowed_http_methods: alloc::vec!["http_get".into()],
+            max_tool_calls: max_calls,
+            max_payload_bytes_per_call: 65536,
+            tls_requirement: crate::policy::TlsRequirement::UnattestedPermitted,
+            required_output_schema: None,
+            schema_versions: Default::default(),
+        }
+    }
+
+    #[cfg(feature = "std")]
+    fn fetching(url: &str) -> GuestInput {
+        let src =
+            alloc::format!(r#"local r = tool.call("http_get", {{ url = "{url}" }}) return 0"#);
+        let mut gi = guest_input_for(&src);
+        gi.oracle_tape = OracleTape {
+            entries: vec![TapeEntry::Ok(b"{\"ok\":1}".to_vec())],
+            attestations: vec![Vec::new()],
+        };
+        gi
+    }
+
+    /// The guarantee this buys: a run that violates the policy cannot be
+    /// replayed, so no proof of it exists. Previously the guest ignored the
+    /// policy entirely and would happily prove this execution while committing
+    /// a policy_hash that said the domain was not allowed.
     #[cfg(feature = "std")]
     #[test]
-    fn tampering_policy_bytes_changes_the_committed_hash() {
-        let policy = crate::policy::profiles::constrained_http_v1();
-        let honest = policy.canonical_bytes();
-        let mut tampered = honest.clone();
-        *tampered.last_mut().unwrap() ^= 1;
+    fn disallowed_domain_cannot_be_replayed() {
+        let input = fetching("https://evil.example/steal")
+            .with_policy_canonical(policy_for(&["api.example.com"], 4).canonical_bytes());
 
-        let (_, pa) = guest_input_for("return 1")
+        let err = input.replay_public_inputs().unwrap_err();
+        let msg = alloc::format!("{err:?}");
+        assert!(msg.contains("evil.example"), "got: {msg}");
+        assert!(msg.contains("allowed_domains"), "got: {msg}");
+    }
+
+    /// Same program and tape, allowed domain: proceeds, and still commits the
+    /// policy. Without this the test above would pass for the wrong reason.
+    #[cfg(feature = "std")]
+    #[test]
+    fn allowed_domain_replays_and_commits_the_policy() {
+        let policy = policy_for(&["api.example.com"], 4);
+        let input = fetching("https://api.example.com/v1/price")
+            .with_policy_canonical(policy.canonical_bytes());
+
+        let (output, pi) = input.replay_public_inputs().unwrap();
+        assert_eq!(output.return_value, LuaValue::Integer(0));
+        assert_eq!(pi.policy_hash, policy.policy_hash());
+    }
+
+    /// Attaching no policy leaves the old behaviour intact: nothing is checked.
+    #[cfg(feature = "std")]
+    #[test]
+    fn without_a_policy_the_same_call_is_unchecked() {
+        let (_, pi) = fetching("https://evil.example/steal")
+            .replay_public_inputs()
+            .unwrap();
+        assert_eq!(pi.policy_hash, [0u8; 32]);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn tool_call_cap_is_enforced_during_replay() {
+        let src = r#"
+            tool.call("http_get", { url = "https://api.example.com/a" })
+            tool.call("http_get", { url = "https://api.example.com/b" })
+            return 0
+        "#;
+        let mut gi = guest_input_for(src);
+        gi.oracle_tape = OracleTape {
+            entries: vec![TapeEntry::Ok(b"{}".to_vec()), TapeEntry::Ok(b"{}".to_vec())],
+            attestations: vec![Vec::new(), Vec::new()],
+        };
+        let input = gi.with_policy_canonical(policy_for(&["api.example.com"], 1).canonical_bytes());
+
+        let err = input.replay_public_inputs().unwrap_err();
+        assert!(
+            alloc::format!("{err:?}").contains("tool call limit 1"),
+            "got: {err:?}"
+        );
+    }
+
+    /// An oversized recorded response is refused before replay starts.
+    #[cfg(feature = "std")]
+    #[test]
+    fn oversized_tape_entry_is_rejected() {
+        let mut policy = policy_for(&["api.example.com"], 4);
+        policy.max_payload_bytes_per_call = 4;
+        let input =
+            fetching("https://api.example.com/v1").with_policy_canonical(policy.canonical_bytes());
+
+        let err = input.replay_public_inputs().unwrap_err();
+        assert!(
+            alloc::format!("{err:?}").contains("max_payload_bytes_per_call"),
+            "got: {err:?}"
+        );
+    }
+
+    /// Corrupt policy bytes are refused rather than silently applied in part,
+    /// since a partially applied policy is indistinguishable from a weaker one.
+    #[cfg(feature = "std")]
+    #[test]
+    fn unparsable_policy_bytes_are_refused() {
+        let mut bytes = policy_for(&["api.example.com"], 4).canonical_bytes();
+        bytes.truncate(bytes.len() - 3);
+        let input = fetching("https://api.example.com/v1").with_policy_canonical(bytes);
+
+        let err = input.replay_public_inputs().unwrap_err();
+        assert!(
+            alloc::format!("{err:?}").contains("unparsable"),
+            "got: {err:?}"
+        );
+    }
+
+    /// A prover editing the policy bytes gets a proof of the *edited* policy,
+    /// not the original: the guest both hashes and enforces the bytes it was
+    /// given, so the two move together.
+    ///
+    /// Here the allowed domain is corrupted from `api.example.com` to
+    /// `bpi.example.com`. The committed hash changes, and the call the original
+    /// policy permitted is now rejected.
+    #[cfg(feature = "std")]
+    #[test]
+    fn tampering_policy_bytes_changes_both_the_hash_and_what_is_enforced() {
+        let policy = policy_for(&["api.example.com"], 4);
+        let honest = policy.canonical_bytes();
+
+        let at = honest
+            .windows(b"api.example.com".len())
+            .position(|w| w == b"api.example.com")
+            .expect("domain present in canonical bytes");
+        let mut tampered = honest.clone();
+        tampered[at] = b'b';
+
+        let url = "https://api.example.com/v1";
+        let (_, honest_pi) = fetching(url)
             .with_policy_canonical(honest)
             .replay_public_inputs()
             .unwrap();
-        let (_, pb) = guest_input_for("return 1")
+        assert_eq!(honest_pi.policy_hash, policy.policy_hash());
+
+        let err = fetching(url)
             .with_policy_canonical(tampered)
             .replay_public_inputs()
-            .unwrap();
-        assert_ne!(pa.policy_hash, pb.policy_hash);
+            .unwrap_err();
+        assert!(
+            alloc::format!("{err:?}").contains("api.example.com"),
+            "tampered policy should reject the domain it no longer lists: {err:?}"
+        );
     }
 
     #[test]

@@ -197,13 +197,34 @@ drift; the two CLIs must be given the same value by hand.
 Omitted list fields mean *unrestricted*, not *denied*, so a sparse policy file is
 wider than a full one.
 
-**Bind, not verify.** The guest receives the policy's `canonical_bytes` and
-SHA-256s them itself, so `policy_hash` provably corresponds to that document and
-a prover cannot assert an unrelated hash. It does **not** attest compliance: the
-policy is enforced host-side during the dry run via `ToolRegistry::with_policy`,
-and the guest does not re-check it. Same boundary as `attestation_hash`.
-Enforcing the policy inside the guest would need a `no_std` subset of the policy
-module and is follow-on work.
+**What the proof attests.** The guest receives the policy's `canonical_bytes`,
+SHA-256s them itself for `policy_hash`, and **enforces them during replay**. A
+run that violates the policy cannot be replayed, so no proof of it exists. This
+holds even if the host skipped enforcement during the dry run: attaching the
+policy at proving time re-checks the program's own tool calls, because the
+program computes its arguments inside the guest.
+
+| Check | Where |
+|---|---|
+| HTTP method restriction | in-guest, proven |
+| Domain allowlist | in-guest, proven |
+| `max_tool_calls` | in-guest, proven (rejected calls count, so probing is not free) |
+| `max_payload_bytes_per_call` | in-guest, checked against the tape before replay |
+| `required_output_schema`, `schema_versions` | **host-side only**, bind-only |
+
+JSON schema validation stays on the host because it needs `serde_json`. That
+part remains a `policy_hash` commitment with no in-proof enforcement, the same
+boundary as `attestation_hash`.
+
+The guest parses the enforceable fields out of the same bytes it hashes
+(`policy::canonical::PolicyView`), so the policy enforced and the policy
+committed are one document by construction. Corrupt bytes are refused outright
+rather than partially applied, since a partially applied policy is
+indistinguishable from a weaker one.
+
+What a proof still cannot tell you is whether a response genuinely came from the
+domain the program requested. That is provenance, delegated to an attestation
+provider.
 
 ### LLM-driven tasks
 

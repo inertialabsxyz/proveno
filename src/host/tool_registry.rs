@@ -1,6 +1,11 @@
 //! `ToolRegistry` — wraps `HostInterface` and enforces VM-side quotas and policy.
 
+use alloc::string::String;
+
+// Only the std-gated policy blocks below use this; the guest-side enforcer
+// imports it from `policy::canonical` directly.
 #[cfg(feature = "std")]
+use crate::policy::canonical::is_http_tool;
 use crate::types::table::LuaKey;
 use crate::{
     host::{
@@ -179,14 +184,10 @@ impl<H: HostInterface> ToolRegistry<H> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-#[cfg(feature = "std")]
-fn is_http_tool(name: &str) -> bool {
-    matches!(name, "http_get" | "http_post")
-}
-
 /// Extract the `url` string from a LuaTable args argument.
-#[cfg(feature = "std")]
-fn get_url_from_args(args: &LuaTable) -> Option<String> {
+/// Shared with `PolicyEnforcingHost` so host-side and guest-side enforcement
+/// read the URL out of a call the same way.
+pub(crate) fn get_url_from_args(args: &LuaTable) -> Option<String> {
     let key = LuaKey::String(LuaString::from_str("url"));
     match args.get(&key) {
         Some(LuaValue::String(s)) => Some(String::from_utf8_lossy(s.as_bytes()).into_owned()),

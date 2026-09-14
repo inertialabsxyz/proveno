@@ -1,3 +1,11 @@
+//! A minimal REPL for running a Lua file through the whole pipeline.
+//!
+//! `cargo run --example repl -- script.lua`, or pipe source on stdin.
+//!
+//! An example rather than a binary target: `DemoHost` serves four toy tools
+//! (echo, add, upper, fail) for smoke-testing, and the core library should not
+//! ship a binary built around them.
+
 use proveno::{
     bytecode, compiler,
     host::transcript::ToolCallStatus,

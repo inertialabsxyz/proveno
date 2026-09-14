@@ -1,7 +1,7 @@
 [package]
 name = "proveno-orchestrator"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 default-run = "proveno-orchestrator"
 
 [dependencies]
@@ -9,12 +9,12 @@ proveno = { path = "..", features = ["serde", "std", "zkvm"] }
 proveno-witness = { path = "../proveno-witness" }
 proveno-noir = { path = "../proveno-noir" }
 proveno-verifier = { path = "../verifier" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+reqwest = { workspace = true, features = ["json", "blocking"] }
 clap = { version = "4", features = ["derive"] }
-sha2 = "0.10"
-dotenvy = "0.15"
+sha2.workspace = true
+dotenvy.workspace = true
 
 [features]
 # Enables the slow end-to-end Noir prove/verify integration test. Requires
@@ -22,7 +22,7 @@ dotenvy = "0.15"
 noir-prove = []
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
 
 [[bin]]
 name = "proveno-orchestrator"

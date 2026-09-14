@@ -1,8 +1,8 @@
 [package]
 name = "proveno-compiler"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 proveno = {path = "../", features=["serde"]}
-serde_json = "1"
+serde_json.workspace = true

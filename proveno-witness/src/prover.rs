@@ -4,7 +4,6 @@ use proveno::{
     compiler::proto::CompiledProgram,
     host::tape::OracleTape,
     policy::OraclePolicy,
-    tls::TlsAttestationRecord,
     types::value::LuaValue,
     vm::engine::{HostInterface, Vm, VmConfig},
     zkvm::commitment::{compute_public_inputs, compute_public_inputs_with_policy},
@@ -29,14 +28,14 @@ impl<H: HostInterface> Prover<H> {
     /// This is "phase 1" of the two-phase execution model. The result contains
     /// the oracle tape needed for the zkVM replay.
     ///
-    /// `tls_attestations` is empty when the host does not support TLS capture.
+    /// `attestations` is empty when no provenance provider is attached.
     /// Pass attestations collected outside the VM (e.g. from a TLS-aware host
-    /// wrapper) via the `tls_attestations` parameter.
+    /// wrapper) via the `attestations` parameter.
     pub fn dry_run(
         self,
         program: &CompiledProgram,
         input: LuaValue,
-        tls_attestations: Vec<TlsAttestationRecord>,
+        attestations: Vec<Vec<u8>>,
     ) -> Result<DryRunResult, proveno::VmError> {
         let mut vm = Vm::new(self.config.clone(), self.host);
         let output = vm.execute(program, input.clone())?;
@@ -48,7 +47,7 @@ impl<H: HostInterface> Prover<H> {
         Ok(DryRunResult {
             output,
             oracle_tape,
-            tls_attestations,
+            attestations,
             public_inputs,
         })
     }
@@ -61,7 +60,7 @@ impl<H: HostInterface> Prover<H> {
         self,
         program: &CompiledProgram,
         input: LuaValue,
-        tls_attestations: Vec<TlsAttestationRecord>,
+        attestations: Vec<Vec<u8>>,
         policy: &OraclePolicy,
     ) -> Result<DryRunResult, proveno::VmError> {
         let mut vm = Vm::new(
@@ -82,7 +81,7 @@ impl<H: HostInterface> Prover<H> {
         Ok(DryRunResult {
             output,
             oracle_tape,
-            tls_attestations,
+            attestations,
             public_inputs,
         })
     }

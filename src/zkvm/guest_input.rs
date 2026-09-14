@@ -76,7 +76,7 @@ impl GuestInput {
     /// `max_payload_bytes_per_call` via [`Self::check_tape_payload_sizes`]
     /// before replay starts. Still bind-only, because they need `serde_json`:
     /// `required_output_schema` and `schema_versions`, which stay host-side in
-    /// `ToolRegistry::with_policy`. `tls_requirement` is parsed but not acted
+    /// `policy::OraclePolicyHost`. `tls_requirement` is parsed but not acted
     /// on, for the same reason `attestation_hash` is bind-only — the guest has
     /// no way to authenticate a provider blob.
     ///

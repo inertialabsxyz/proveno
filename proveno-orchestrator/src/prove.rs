@@ -6,7 +6,6 @@ use std::{
 use proveno::{
     compiler::proto::CompiledProgram,
     host::tape::OracleTape,
-    tls::TlsAttestationRecord,
     types::value::LuaValue,
     vm::engine::VmOutput,
     zkvm::commitment::{PublicInputs, compute_public_inputs},
@@ -58,7 +57,7 @@ pub struct NoirProveSummary {
 /// witness generation), then serializes `compiled.json` and `dry_result.json`
 /// into the output directory.
 ///
-/// `tls_attestations` should contain any TLS certificate records captured
+/// `attestations` should contain any provenance blobs captured
 /// during HTTP(S) tool calls.  Pass an empty slice when TLS attestation is
 /// not available.
 pub fn build_proof_artifacts(
@@ -66,7 +65,7 @@ pub fn build_proof_artifacts(
     source: &str,
     input: &LuaValue,
     output: VmOutput,
-    tls_attestations: Vec<TlsAttestationRecord>,
+    attestations: Vec<Vec<u8>>,
     output_dir: &str,
 ) -> Result<ProveArtifacts, String> {
     // Build oracle tape from transcript
@@ -79,7 +78,7 @@ pub fn build_proof_artifacts(
     let dry_run_result = DryRunResult {
         output,
         oracle_tape,
-        tls_attestations,
+        attestations,
         public_inputs: public_inputs.clone(),
     };
 
@@ -179,7 +178,7 @@ pub fn build_proof_artifacts_with_openvm(
     source: &str,
     input: &LuaValue,
     output: VmOutput,
-    tls_attestations: Vec<TlsAttestationRecord>,
+    attestations: Vec<Vec<u8>>,
     opts: OpenVmOptions<'_>,
 ) -> Result<ProveArtifacts, String> {
     let OpenVmOptions {
@@ -188,7 +187,7 @@ pub fn build_proof_artifacts_with_openvm(
         policy_spec,
     } = opts;
     let mut artifacts =
-        build_proof_artifacts(program, source, input, output, tls_attestations, output_dir)?;
+        build_proof_artifacts(program, source, input, output, attestations, output_dir)?;
 
     let proof_path = PathBuf::from(output_dir).join(format!("openvm.{level}.proof"));
     let input_path = PathBuf::from(output_dir).join("openvm_input.json");
@@ -290,12 +289,12 @@ pub fn build_proof_artifacts_with_noir(
     source: &str,
     input: &LuaValue,
     output: VmOutput,
-    tls_attestations: Vec<TlsAttestationRecord>,
+    attestations: Vec<Vec<u8>>,
     output_dir: &str,
     circuit_dir: &Path,
 ) -> Result<ProveArtifacts, String> {
     let mut artifacts =
-        build_proof_artifacts(program, source, input, output, tls_attestations, output_dir)?;
+        build_proof_artifacts(program, source, input, output, attestations, output_dir)?;
 
     // Reconstruct the `DryRunResult` from the freshly written JSON so we
     // share the exact bytes the standalone proveno-noir CLI would consume.

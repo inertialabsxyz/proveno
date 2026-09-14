@@ -36,7 +36,11 @@ dotenvy = "0.15"
 tempfile = "3"
 
 [features]
-default = ["std", "poseidon", "tls"]
+# `poseidon` stays in the default set deliberately: compiler::codegen selects
+# the program-hash scheme on it, so removing it would silently switch every
+# committed program_hash from Poseidon2 to SHA-256. `tls` is opt-in because it
+# is one provenance provider, not part of the runtime.
+default = ["std", "poseidon"]
 std = ["dep:serde_json"]
 zkvm = []
 

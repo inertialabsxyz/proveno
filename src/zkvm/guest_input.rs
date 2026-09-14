@@ -8,12 +8,9 @@ use alloc::{string::String, vec::Vec};
 
 use crate::{
     compiler::proto::CompiledProgram,
-    host::{
-        policy_host::PolicyEnforcingHost,
-        tape::{OracleTape, TapeEntry, TapeHost},
-    },
+    host::tape::{OracleTape, TapeEntry, TapeHost},
     noir::encoder::compute_program_hash_sha256,
-    policy::canonical::PolicyView,
+    policy::{canonical::PolicyView, guest::PolicyEnforcingHost},
     types::value::LuaValue,
     vm::{
         engine::{Vm, VmConfig, VmOutput},

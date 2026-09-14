@@ -64,7 +64,10 @@ impl<H: HostInterface> Prover<H> {
         tls_attestations: Vec<TlsAttestationRecord>,
         policy: &OraclePolicy,
     ) -> Result<DryRunResult, proveno::VmError> {
-        let mut vm = Vm::new_with_policy(self.config.clone(), self.host, policy.clone());
+        let mut vm = Vm::new(
+            self.config.clone(),
+            proveno::policy::OraclePolicyHost::new(self.host, policy),
+        );
         let output = vm.execute(program, input.clone())?;
 
         let oracle_tape = OracleTape::from_records(&output.transcript);

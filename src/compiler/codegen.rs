@@ -87,9 +87,10 @@ impl Compiler {
         // Overwrite the placeholder at index 0.
         c.prototypes[0] = proto;
         #[cfg(feature = "poseidon")]
-        let program_hash = crate::noir::encoder::compute_program_hash(&c.prototypes);
+        let program_hash = crate::compiler::program_hash::compute_program_hash(&c.prototypes);
         #[cfg(not(feature = "poseidon"))]
-        let program_hash = crate::noir::encoder::compute_program_hash_sha256(&c.prototypes);
+        let program_hash =
+            crate::compiler::program_hash::compute_program_hash_sha256(&c.prototypes);
         Ok(super::proto::CompiledProgram {
             prototypes: c.prototypes,
             program_hash,

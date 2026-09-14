@@ -7,9 +7,8 @@
 use alloc::{string::String, vec::Vec};
 
 use crate::{
-    compiler::proto::CompiledProgram,
+    compiler::{program_hash::compute_program_hash_sha256, proto::CompiledProgram},
     host::tape::{OracleTape, TapeEntry, TapeHost},
-    noir::encoder::compute_program_hash_sha256,
     policy::{canonical::PolicyView, guest::PolicyEnforcingHost},
     types::value::LuaValue,
     vm::{

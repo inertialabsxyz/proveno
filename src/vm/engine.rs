@@ -7,7 +7,7 @@ use crate::{
         tool_registry::ToolRegistry,
         transcript::{ToolCallRecord, Transcript},
     },
-    noir::{
+    isa::{
         opcodes::{instruction_to_opcode_id, instruction_to_operand},
         trace::TraceStep,
     },

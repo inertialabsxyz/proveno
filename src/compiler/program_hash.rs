@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     compiler::proto::FunctionProto,
-    noir::opcodes::{instruction_to_opcode_id, instruction_to_operand},
+    isa::opcodes::{instruction_to_opcode_id, instruction_to_operand},
 };
 
 #[cfg(feature = "poseidon")]

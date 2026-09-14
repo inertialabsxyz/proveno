@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use crate::compiler::proto::CompiledProgram;
 
-use super::opcodes::{instruction_to_opcode_id, instruction_to_operand};
+use crate::isa::opcodes::{instruction_to_opcode_id, instruction_to_operand};
 
 pub const MAX_BYTECODE: usize = 512;
 

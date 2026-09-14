@@ -6,6 +6,7 @@ extern crate alloc;
 pub mod bytecode;
 pub mod compiler;
 pub mod host;
+pub mod isa;
 pub mod noir;
 pub mod parser;
 pub mod policy;

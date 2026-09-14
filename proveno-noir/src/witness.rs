@@ -1,8 +1,8 @@
 use std::io;
 use std::path::Path;
 
+use proveno::isa::trace::TraceStep;
 use proveno::noir::encoder::NoirBytecode;
-use proveno::noir::trace::TraceStep;
 use proveno::types::value::LuaValue;
 use proveno::vm::engine::VmOutput;
 use proveno::zkvm::commitment::{hash_input, hash_output};

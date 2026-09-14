@@ -87,7 +87,7 @@ impl HostInterface for ProverHost {
                 resp.rawset(str_key("timestamp"), LuaValue::Integer(ts))
                     .unwrap();
             }
-            // echo / add / upper mirror the demo tools in src/main.rs and the
+            // echo / add / upper mirror the demo tools in examples/repl.rs and the
             // orchestrator's StubHost, response shapes included, so the example
             // programs run unchanged through the proving pipeline.
             "echo" => {

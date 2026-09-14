@@ -20,6 +20,9 @@ const STATE_WIDTH: u32 = 4;
 ///
 /// Mirrors `Poseidon2::hash_internal` from noir-lang/poseidon v0.3.0
 /// (src/poseidon2.nr) so on-host and in-circuit hashes agree.
+// The absorb loops are written index-first to stay line-for-line comparable with
+// `poseidon2.nr`; an iterator rewrite would obscure that correspondence.
+#[allow(clippy::needless_range_loop)]
 pub fn poseidon2_hash(inputs: &[FieldElement]) -> FieldElement {
     let in_len = inputs.len();
     let two_pow_64 = FieldElement::from(1u128 << 64);
@@ -45,7 +48,7 @@ pub fn poseidon2_hash(inputs: &[FieldElement]) -> FieldElement {
         }
     }
 
-    if in_len == 0 || in_len % RATE != 0 {
+    if in_len == 0 || !in_len.is_multiple_of(RATE) {
         let permuted = poseidon2_permutation(&state, STATE_WIDTH).expect("permutation");
         state.copy_from_slice(&permuted);
     }

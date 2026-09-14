@@ -135,7 +135,7 @@ pub struct CompiledProgram {
     ///   carry constant-pool *indices*, so the instruction stream alone cannot
     ///   tell `return 1` from `return "omega"`.
     ///
-    /// See `crate::noir::encoder::compute_program_hash` and
+    /// See `crate::compiler::program_hash::compute_program_hash` and
     /// `compute_program_hash_sha256` for the two definitions.
     pub program_hash: [u8; 32],
 }

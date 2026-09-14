@@ -382,7 +382,7 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
                     });
                 }
                 let d_out = apply_delta(proto_idx, pc, d, delta)?;
-                if pc + 1 <= code_len {
+                if pc < code_len {
                     // Only schedule fall-through if there is a next instruction.
                     if pc + 1 < code_len {
                         schedule(proto_idx, pc + 1, d_out, &mut depths, &mut worklist)?;
@@ -403,7 +403,7 @@ fn schedule(
     proto_idx: u16,
     pc: usize,
     depth: usize,
-    depths: &mut Vec<Option<usize>>,
+    depths: &mut [Option<usize>],
     worklist: &mut VecDeque<(usize, usize)>,
 ) -> Result<(), VerifyError> {
     match depths[pc] {

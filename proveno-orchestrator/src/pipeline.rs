@@ -291,7 +291,10 @@ pub fn execute_with_policy<H: HostInterface>(
     host: H,
     policy: proveno::policy::OraclePolicy,
 ) -> Result<VmOutput, PipelineError> {
-    let mut vm = Vm::new_with_policy(config, host, policy);
+    let mut vm = Vm::new(
+        config,
+        proveno::policy::OraclePolicyHost::new(host, &policy),
+    );
     vm.execute(program, input).map_err(|e| {
         let msg = format_vm_error(&e);
         PipelineError::Runtime(msg, e)

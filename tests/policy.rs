@@ -5,7 +5,7 @@ use proveno::{
     compiler::compile,
     parser::parse,
     policy::profiles::{constrained_http_v1, template_price_feed_v1},
-    policy::{OraclePolicy, TlsRequirement},
+    policy::{OraclePolicy, OraclePolicyHost, TlsRequirement},
     types::{
         table::{LuaKey, LuaTable},
         value::{LuaString, LuaValue},
@@ -36,6 +36,7 @@ impl MockHost {
         self.responses.push(Ok(t));
     }
 
+    #[allow(dead_code)] // counterpart to add_ok; kept so the mock stays symmetric
     fn add_err(&mut self, msg: &str) {
         self.responses.push(Err(msg.to_owned()));
     }
@@ -74,7 +75,7 @@ fn run_with_policy(
     let block = parse(src).expect("parse failed");
     let program = compile(&block).expect("compile failed");
     verify(&program).expect("verify failed");
-    let mut vm = Vm::new_with_policy(VmConfig::default(), host, policy);
+    let mut vm = Vm::new(VmConfig::default(), OraclePolicyHost::new(host, &policy));
     vm.execute(&program, LuaValue::Nil).map_err(strip_line_info)
 }
 
@@ -101,11 +102,10 @@ fn domain_allowlist_rejects_unapproved_domain() {
     "#;
 
     let err = run_with_policy(src, host, policy).unwrap_err();
-    assert!(matches!(err, VmError::RuntimeError(_)));
-    if let VmError::RuntimeError(LuaValue::String(s)) = err {
-        let msg = String::from_utf8_lossy(s.as_bytes());
-        assert!(msg.contains("policy"), "expected 'policy' in error: {msg}");
-    }
+    assert!(
+        matches!(err, VmError::ToolError(ref m) if m.contains("policy")),
+        "expected a policy ToolError, got: {err:?}"
+    );
 }
 
 #[test]
@@ -195,11 +195,10 @@ fn schema_mismatch_returns_vm_error() {
     "#;
 
     let err = run_with_policy(src, host, policy).unwrap_err();
-    assert!(matches!(err, VmError::RuntimeError(_)));
-    if let VmError::RuntimeError(LuaValue::String(s)) = err {
-        let msg = String::from_utf8_lossy(s.as_bytes());
-        assert!(msg.contains("policy"), "expected 'policy' in: {msg}");
-    }
+    assert!(
+        matches!(err, VmError::ToolError(ref m) if m.contains("policy")),
+        "expected a policy ToolError, got: {err:?}"
+    );
 }
 
 #[test]
@@ -256,11 +255,10 @@ fn http_post_rejected_when_only_get_allowed() {
     "#;
 
     let err = run_with_policy(src, host, policy).unwrap_err();
-    assert!(matches!(err, VmError::RuntimeError(_)));
-    if let VmError::RuntimeError(LuaValue::String(s)) = err {
-        let msg = String::from_utf8_lossy(s.as_bytes());
-        assert!(msg.contains("policy"), "expected 'policy' in: {msg}");
-    }
+    assert!(
+        matches!(err, VmError::ToolError(ref m) if m.contains("policy")),
+        "expected a policy ToolError, got: {err:?}"
+    );
 }
 
 #[test]

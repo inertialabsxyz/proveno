@@ -1,4 +1,4 @@
-.PHONY: check lint test test-nostd test-prove build-openvm prove-openvm prove-examples fix build dev act help
+.PHONY: check lint test test-tls test-nostd test-prove build-openvm prove-openvm prove-examples fix build dev act help
 
 help:
 	@echo "Usage: make <target>"
@@ -15,10 +15,11 @@ help:
 	@echo "  prove-openvm   full OpenVM pipeline on examples/simple.lua: compile -> prove -> verify"
 	@echo "  prove-examples run every examples/*.lua through the OpenVM pipeline"
 	@echo "  fix            auto-format + apply safe clippy fixes"
+	@echo "  test-tls       cargo test --features tls --test tls"
 	@echo "  build          cargo build"
 
 # CI target — must pass before merging
-check: lint test test-nostd
+check: lint test test-tls test-nostd
 
 # Format check + clippy (warnings are errors)
 lint:
@@ -28,6 +29,12 @@ lint:
 # All tests: unit (within modules) + integration (tests/)
 test:
 	cargo test
+
+# TLS attestation tests. `tls` is not a default feature (it is one provenance
+# provider, not part of the runtime), so plain `cargo test` does not reach
+# tests/tls.rs. The two tests that need network are #[ignore]d.
+test-tls:
+	cargo test -p proveno --features tls --test tls
 
 # Unit tests only
 test-unit:

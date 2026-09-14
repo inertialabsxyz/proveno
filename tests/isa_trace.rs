@@ -2,7 +2,7 @@ use proveno::types::value::LuaValue;
 use proveno::{
     bytecode::verify,
     compiler::compile,
-    noir::opcodes::{CALL, JMP_IF_NOT, RET},
+    isa::opcodes::{CALL, JMP_IF_NOT, RET},
     parser::parse,
     vm::engine::{NoopHost, Vm, VmConfig},
 };

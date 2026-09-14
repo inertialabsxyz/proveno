@@ -1,10 +1,11 @@
 [package]
 name = "proveno-openvm"
-version = "0.1.0"
+version.workspace = true
+# Not yet on the workspace edition; migrating this crate to 2024 is separate work.
 edition = "2021"
 
 [dependencies]
-openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.2", features = ["std"] }
+openvm.workspace = true
 # `default-features = false` is load-bearing, not tidiness: the default
 # `poseidon` feature pulls bn254_blackbox_solver -> wasmer -> cranelift ->
 # target-lexicon 0.12, whose build script hard-panics on the custom RISC-V

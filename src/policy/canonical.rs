@@ -16,6 +16,11 @@
 
 use alloc::{format, string::String, vec::Vec};
 
+use crate::types::{
+    table::{LuaKey, LuaTable},
+    value::{LuaString, LuaValue},
+};
+
 /// TLS enforcement requirement for HTTPS tool calls.
 ///
 /// Lives here rather than beside `OraclePolicy` so the guest can name it
@@ -46,6 +51,20 @@ pub fn extract_domain(url: &str) -> Option<&str> {
 /// Whether a tool name is one the HTTP policy rules apply to.
 pub fn is_http_tool(name: &str) -> bool {
     matches!(name, "http_get" | "http_post")
+}
+
+/// Extract the `url` string from a tool call's argument table.
+///
+/// Lives here rather than in `host` because only policy enforcement reads it:
+/// both `OraclePolicyHost` (host-side) and `guest::PolicyEnforcingHost`
+/// (in-guest) must pull the URL out of a call the same way, or the policy
+/// enforced during a dry run would not be the policy enforced during replay.
+pub fn get_url_from_args(args: &LuaTable) -> Option<String> {
+    let key = LuaKey::String(LuaString::from_str("url"));
+    match args.get(&key) {
+        Some(LuaValue::String(s)) => Some(String::from_utf8_lossy(s.as_bytes()).into_owned()),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

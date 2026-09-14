@@ -378,9 +378,7 @@ impl<'src> Lexer<'src> {
                     // Not a close; put back into buf
                     if !discard {
                         buf.push(b']');
-                        for _ in 0..eq {
-                            buf.push(b'=');
-                        }
+                        buf.extend(core::iter::repeat_n(b'=', eq));
                     }
                 }
             } else {
@@ -681,7 +679,6 @@ impl<'src> Lexer<'src> {
             b'n' => Ok(b'\n'),
             b'r' => Ok(b'\r'),
             b't' => Ok(b'\t'),
-            b'0' => Ok(0),
             b'a' => Ok(7),  // bell
             b'b' => Ok(8),  // backspace
             b'f' => Ok(12), // form feed
@@ -765,9 +762,7 @@ impl<'src> Lexer<'src> {
                     return Ok(buf);
                 } else {
                     buf.push(b']');
-                    for _ in 0..eq {
-                        buf.push(b'=');
-                    }
+                    buf.extend(core::iter::repeat_n(b'=', eq));
                 }
             } else {
                 buf.push(c);
@@ -897,6 +892,17 @@ mod tests {
     fn string_decimal_escape() {
         let toks = lex_ok(r#""\97""#);
         assert_eq!(toks[0], Token::StringLit(vec![97]));
+    }
+
+    #[test]
+    fn string_decimal_escape_leading_zero() {
+        // `\0` used to be matched by its own arm ahead of `b'0'..=b'9'`, so any
+        // multi-digit decimal escape starting with zero was truncated to NUL and
+        // the remaining digits leaked through as literal text.
+        assert_eq!(lex_ok(r#""\012""#)[0], Token::StringLit(vec![12]));
+        assert_eq!(lex_ok(r#""\065""#)[0], Token::StringLit(vec![65]));
+        assert_eq!(lex_ok(r#""\0""#)[0], Token::StringLit(vec![0]));
+        assert_eq!(lex_ok(r#""\00""#)[0], Token::StringLit(vec![0]));
     }
 
     #[test]

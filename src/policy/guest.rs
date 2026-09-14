@@ -21,12 +21,10 @@
 use alloc::{format, string::String, vec::Vec};
 
 use crate::{
-    policy::canonical::{PolicyView, is_http_tool},
+    policy::canonical::{PolicyView, get_url_from_args, is_http_tool},
     types::table::LuaTable,
     vm::engine::HostInterface,
 };
-
-use super::tool_registry::get_url_from_args;
 
 /// Wraps a host and rejects tool calls the policy does not permit.
 pub struct PolicyEnforcingHost<'a, H> {

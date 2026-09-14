@@ -84,6 +84,12 @@ pub struct LuaTable {
     hash_capacity: usize,
 }
 
+impl Default for LuaTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LuaTable {
     pub fn new() -> Self {
         LuaTable {
@@ -95,10 +101,11 @@ impl LuaTable {
     }
 
     pub fn get(&self, key: &LuaKey) -> Option<&LuaValue> {
-        if let LuaKey::Integer(i) = key {
-            if *i >= 1 && *i <= self.array.len() as i64 {
-                return Some(&self.array[(*i - 1) as usize]);
-            }
+        if let LuaKey::Integer(i) = key
+            && *i >= 1
+            && *i <= self.array.len() as i64
+        {
+            return Some(&self.array[(*i - 1) as usize]);
         }
         self.hash.get(key)
     }
@@ -119,10 +126,10 @@ impl LuaTable {
         key: LuaKey,
         value: LuaValue,
     ) -> Result<RawsetResult, LuaError> {
-        if let LuaKey::Integer(i) = key {
-            if i == i64::MIN {
-                return Err(LuaError::Runtime);
-            }
+        if let LuaKey::Integer(i) = key
+            && i == i64::MIN
+        {
+            return Err(LuaError::Runtime);
         }
 
         if matches!(value, LuaValue::Nil) {
@@ -278,7 +285,7 @@ fn next_power_of_two_capacity(n: usize) -> usize {
     if n == 0 {
         return 0;
     }
-    let load_threshold = (n * 4 + 2) / 3; // ceil(n / 0.75)
+    let load_threshold = (n * 4).div_ceil(3); // ceil(n / 0.75)
     load_threshold.next_power_of_two().max(4)
 }
 

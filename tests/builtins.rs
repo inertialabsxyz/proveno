@@ -62,6 +62,7 @@ fn assert_returns_true(src: &str) {
     assert_returns(src, LuaValue::Boolean(true));
 }
 
+#[allow(dead_code)] // counterpart to assert_returns_true; kept for symmetry
 fn assert_returns_false(src: &str) {
     assert_returns(src, LuaValue::Boolean(false));
 }

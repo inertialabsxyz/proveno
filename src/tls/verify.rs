@@ -82,9 +82,7 @@ fn spki_is_p256(cert: &x509_cert::Certificate) -> bool {
         return false;
     }
     match &spki.algorithm.parameters {
-        Some(params) => params
-            .decode_as::<ObjectIdentifier>()
-            .map_or(false, |oid| oid == SECP256R1),
+        Some(params) => params.decode_as::<ObjectIdentifier>() == Ok(SECP256R1),
         None => false,
     }
 }
@@ -296,21 +294,21 @@ fn verify_cert_sig_rsa(
             Ok(s) => s,
             Err(_) => return false,
         };
-        vk.verify(&tbs_der, &sig).is_ok()
+        vk.verify(tbs_der, &sig).is_ok()
     } else if sig_alg == SHA384_RSA {
         let vk = VerifyingKey::<Sha384>::new(rsa_key);
         let sig = match rsa::pkcs1v15::Signature::try_from(sig_bytes) {
             Ok(s) => s,
             Err(_) => return false,
         };
-        vk.verify(&tbs_der, &sig).is_ok()
+        vk.verify(tbs_der, &sig).is_ok()
     } else if sig_alg == SHA512_RSA {
         let vk = VerifyingKey::<Sha512>::new(rsa_key);
         let sig = match rsa::pkcs1v15::Signature::try_from(sig_bytes) {
             Ok(s) => s,
             Err(_) => return false,
         };
-        vk.verify(&tbs_der, &sig).is_ok()
+        vk.verify(tbs_der, &sig).is_ok()
     } else {
         false // Unsupported RSA hash algorithm
     }
@@ -365,15 +363,13 @@ fn is_signed_by_mozilla_root(cert_der: &[u8], cert: &x509_cert::Certificate) -> 
     // ── Case 1: cert IS a trust anchor (SPKI direct match) ───────────────────
     // Trust anchors store SPKI as inner content (no outer SEQUENCE wrapper).
     // We strip the outer SEQUENCE from cert's SPKI to get the same format.
-    if let Ok(full_spki) = cert.tbs_certificate.subject_public_key_info.to_der() {
-        if let Some(inner_spki) = der_inner(&full_spki, 0x30) {
-            if webpki_roots::TLS_SERVER_ROOTS
-                .iter()
-                .any(|a| a.subject_public_key_info.as_ref() == inner_spki)
-            {
-                return true;
-            }
-        }
+    if let Ok(full_spki) = cert.tbs_certificate.subject_public_key_info.to_der()
+        && let Some(inner_spki) = der_inner(&full_spki, 0x30)
+        && webpki_roots::TLS_SERVER_ROOTS
+            .iter()
+            .any(|a| a.subject_public_key_info.as_ref() == inner_spki)
+    {
+        return true;
     }
 
     // ── Case 2: a trust anchor's key verifies cert's signature ───────────────
@@ -428,15 +424,15 @@ fn is_signed_by_mozilla_root(cert_der: &[u8], cert: &x509_cert::Certificate) -> 
             };
             let ok = if sig_alg == SHA256_RSA {
                 VerifyingKey::<Sha256>::new(rsa_key)
-                    .verify(&tbs_der, &sig)
+                    .verify(tbs_der, &sig)
                     .is_ok()
             } else if sig_alg == SHA384_RSA {
                 VerifyingKey::<Sha384>::new(rsa_key)
-                    .verify(&tbs_der, &sig)
+                    .verify(tbs_der, &sig)
                     .is_ok()
             } else if sig_alg == SHA512_RSA {
                 VerifyingKey::<Sha512>::new(rsa_key)
-                    .verify(&tbs_der, &sig)
+                    .verify(tbs_der, &sig)
                     .is_ok()
             } else {
                 false
@@ -552,12 +548,11 @@ pub fn san_contains_hostname(san_der: &[u8], hostname: &str) -> bool {
             Some(x) => x,
             None => break,
         };
-        if tag == DNS_NAME_TAG {
-            if let Ok(s) = core::str::from_utf8(content) {
-                if dns_name_matches(s, hostname) {
-                    return true;
-                }
-            }
+        if tag == DNS_NAME_TAG
+            && let Ok(s) = core::str::from_utf8(content)
+            && dns_name_matches(s, hostname)
+        {
+            return true;
         }
         pos += total_len;
     }

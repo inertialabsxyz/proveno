@@ -7,13 +7,9 @@
 use alloc::{string::String, vec::Vec};
 
 use crate::{
-    compiler::proto::CompiledProgram,
-    host::{
-        policy_host::PolicyEnforcingHost,
-        tape::{OracleTape, TapeEntry, TapeHost},
-    },
-    noir::encoder::compute_program_hash_sha256,
-    policy::canonical::PolicyView,
+    compiler::{program_hash::compute_program_hash_sha256, proto::CompiledProgram},
+    host::tape::{OracleTape, TapeEntry, TapeHost},
+    policy::{canonical::PolicyView, guest::PolicyEnforcingHost},
     types::value::LuaValue,
     vm::{
         engine::{Vm, VmConfig, VmOutput},
@@ -80,7 +76,7 @@ impl GuestInput {
     /// `max_payload_bytes_per_call` via [`Self::check_tape_payload_sizes`]
     /// before replay starts. Still bind-only, because they need `serde_json`:
     /// `required_output_schema` and `schema_versions`, which stay host-side in
-    /// `ToolRegistry::with_policy`. `tls_requirement` is parsed but not acted
+    /// `policy::OraclePolicyHost`. `tls_requirement` is parsed but not acted
     /// on, for the same reason `attestation_hash` is bind-only — the guest has
     /// no way to authenticate a provider blob.
     ///

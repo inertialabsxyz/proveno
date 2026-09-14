@@ -122,6 +122,35 @@ pub fn compute_tls_attestation_hash(records: &[TlsAttestationRecord]) -> [u8; 32
     field_to_be_bytes32(poseidon2_hash(&fields))
 }
 
+impl TlsAttestationRecord {
+    /// Encode this record as the opaque attestation blob the rest of the stack
+    /// carries (`HostInterface::take_attestation`, `OracleTape::attestations`,
+    /// `DryRunResult::attestations`).
+    ///
+    /// Those layers treat provenance as bytes so they do not depend on any one
+    /// provider. This is the encoder for the TLS provider specifically, and it
+    /// is where a TLS record crosses into that opaque representation.
+    ///
+    /// Every field is length-prefixed or fixed-width, so distinct records
+    /// cannot share an encoding.
+    pub fn to_attestation_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.push(u8::from(self.p256_verified));
+        out.extend_from_slice(&self.cert_not_after.to_be_bytes());
+
+        let host = self.hostname.as_bytes();
+        out.extend_from_slice(&(host.len() as u32).to_be_bytes());
+        out.extend_from_slice(host);
+
+        out.extend_from_slice(&(self.cert_chain_der.len() as u32).to_be_bytes());
+        for cert in &self.cert_chain_der {
+            out.extend_from_slice(&(cert.len() as u32).to_be_bytes());
+            out.extend_from_slice(cert);
+        }
+        out
+    }
+}
+
 /// The canonical "no attestation" hash: `Poseidon2::hash([], 0)` serialised to
 /// `[u8; 32]` big-endian. Use this in place of `[0u8; 32]` when asserting that
 /// no verified TLS attestation was captured.
@@ -133,6 +162,61 @@ pub fn empty_tls_attestation_hash() -> [u8; 32] {
 #[cfg(all(test, feature = "tls"))]
 mod tests {
     use super::*;
+
+    fn record() -> TlsAttestationRecord {
+        TlsAttestationRecord {
+            cert_chain_der: vec![vec![1, 2, 3], vec![4, 5]],
+            p256_verified: true,
+            hostname: "example.com".to_owned(),
+            cert_not_after: 1_700_000_000,
+        }
+    }
+
+    #[test]
+    fn attestation_bytes_are_deterministic() {
+        assert_eq!(
+            record().to_attestation_bytes(),
+            record().to_attestation_bytes()
+        );
+    }
+
+    #[test]
+    fn attestation_bytes_distinguish_every_field() {
+        let base = record().to_attestation_bytes();
+
+        let mut r = record();
+        r.p256_verified = false;
+        assert_ne!(base, r.to_attestation_bytes());
+
+        let mut r = record();
+        r.cert_not_after += 1;
+        assert_ne!(base, r.to_attestation_bytes());
+
+        let mut r = record();
+        r.hostname = "example.org".to_owned();
+        assert_ne!(base, r.to_attestation_bytes());
+
+        let mut r = record();
+        r.cert_chain_der = vec![vec![1, 2, 3]];
+        assert_ne!(base, r.to_attestation_bytes());
+    }
+
+    #[test]
+    fn attestation_bytes_resist_chain_boundary_collisions() {
+        // Length prefixes mean a chain cannot be re-split without changing the
+        // encoding, even though the concatenated DER is identical.
+        let mut a = record();
+        a.cert_chain_der = vec![vec![1, 2], vec![3, 4]];
+        let mut b = record();
+        b.cert_chain_der = vec![vec![1, 2, 3, 4]];
+        assert_ne!(a.to_attestation_bytes(), b.to_attestation_bytes());
+    }
+
+    #[test]
+    fn unavailable_encodes_without_panicking() {
+        let bytes = TlsAttestationRecord::unavailable().to_attestation_bytes();
+        assert!(!bytes.is_empty());
+    }
 
     /// Verified record carrying garbage DER bytes. Pubkey extraction fails so
     /// this contributes nothing to the hash — used to exercise the

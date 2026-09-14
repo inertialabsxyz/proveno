@@ -97,11 +97,7 @@ impl TlsCapturingHost {
 
         // Build Mozilla root store.
         let root_store = RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS
-                .iter()
-                .cloned()
-                .map(Into::into)
-                .collect(),
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
         };
 
         // Build a custom verifier that captures cert chain bytes.
@@ -422,7 +418,7 @@ fn tls_reverify_attestations_matches_prover() {
     );
 
     // Run reverify_attestations — the same logic the guest executes.
-    let verified = reverify_attestations(&[prover_record.clone()]);
+    let verified = reverify_attestations(core::slice::from_ref(&prover_record));
     assert_eq!(verified.len(), 1);
 
     let r = &verified[0];

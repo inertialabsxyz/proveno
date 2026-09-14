@@ -7,7 +7,7 @@ use crate::{
         tool_registry::ToolRegistry,
         transcript::{ToolCallRecord, Transcript},
     },
-    noir::{
+    isa::{
         opcodes::{instruction_to_opcode_id, instruction_to_operand},
         trace::TraceStep,
     },
@@ -195,25 +195,6 @@ impl<H: HostInterface> Vm<H> {
         }
     }
 
-    #[cfg(feature = "std")]
-    /// Create a VM with an attached `OraclePolicy`. Tool calls are checked
-    /// against the policy's domain allowlist, method restriction, and schemas.
-    pub fn new_with_policy(config: VmConfig, host: H, policy: crate::policy::OraclePolicy) -> Self {
-        let gas = GasMeter::new(config.gas_limit);
-        let mem = MemoryMeter::new(config.memory_limit_bytes);
-        Vm {
-            config,
-            gas,
-            mem,
-            stack: Vec::new(),
-            frames: Vec::new(),
-            logs: Vec::new(),
-            transcript: Transcript::new(),
-            registry: ToolRegistry::with_policy(host, policy),
-            globals: build_globals(),
-        }
-    }
-
     pub fn execute(
         &mut self,
         program: &CompiledProgram,
@@ -308,13 +289,7 @@ impl<H: HostInterface> Vm<H> {
                     }
                     Some(StackSlot::Shared(cell)) => match &*cell.borrow() {
                         LuaValue::Integer(n) => *n,
-                        LuaValue::Boolean(b) => {
-                            if *b {
-                                1
-                            } else {
-                                0
-                            }
-                        }
+                        LuaValue::Boolean(b) if *b => 1,
                         _ => 0,
                     },
                     _ => 0,
@@ -1179,9 +1154,8 @@ impl<H: HostInterface> Vm<H> {
             let code_len = program.prototypes[proto_idx].code.len();
 
             if pc >= code_len {
-                match self.do_return(0)? {
-                    Some(v) => return Ok(v),
-                    None => {}
+                if let Some(v) = self.do_return(0)? {
+                    return Ok(v);
                 }
                 if self.frames.len() <= target_frame_depth {
                     break;
@@ -1192,9 +1166,8 @@ impl<H: HostInterface> Vm<H> {
             let instr = program.prototypes[proto_idx].code[pc].clone();
             self.frames.last_mut().unwrap().pc += 1;
 
-            match self.dispatch(program, instr)? {
-                Some(v) => return Ok(v),
-                None => {}
+            if let Some(v) = self.dispatch(program, instr)? {
+                return Ok(v);
             }
 
             if self.frames.len() <= target_frame_depth {
@@ -1218,12 +1191,12 @@ impl<H: HostInterface> Vm<H> {
     /// If `v` is a sentinel string like `__tostring`, look it up in the globals
     /// table and return the resolved value. Otherwise return `v` unchanged.
     fn resolve_sentinel(&self, v: LuaValue) -> LuaValue {
-        if let LuaValue::String(ref s) = v {
-            if s.as_bytes().starts_with(b"__") {
-                let key = LuaKey::String(s.clone());
-                if let Some(resolved) = self.globals.get(&key) {
-                    return resolved.clone();
-                }
+        if let LuaValue::String(ref s) = v
+            && s.as_bytes().starts_with(b"__")
+        {
+            let key = LuaKey::String(s.clone());
+            if let Some(resolved) = self.globals.get(&key) {
+                return resolved.clone();
             }
         }
         v
@@ -1295,7 +1268,7 @@ impl<H: HostInterface> Vm<H> {
         Ok(())
     }
 
-    fn merge_sort_default(&self, arr: &mut Vec<LuaValue>) -> Result<(), VmError> {
+    fn merge_sort_default(&self, arr: &mut [LuaValue]) -> Result<(), VmError> {
         let n = arr.len();
         if n <= 1 {
             return Ok(());
@@ -1342,7 +1315,7 @@ impl<H: HostInterface> Vm<H> {
     fn merge_sort_with_comp(
         &mut self,
         program: &CompiledProgram,
-        arr: &mut Vec<LuaValue>,
+        arr: &mut [LuaValue],
         comp: LuaValue,
     ) -> Result<(), VmError> {
         let n = arr.len();

@@ -87,9 +87,10 @@ impl Compiler {
         // Overwrite the placeholder at index 0.
         c.prototypes[0] = proto;
         #[cfg(feature = "poseidon")]
-        let program_hash = crate::noir::encoder::compute_program_hash(&c.prototypes);
+        let program_hash = crate::compiler::program_hash::compute_program_hash(&c.prototypes);
         #[cfg(not(feature = "poseidon"))]
-        let program_hash = crate::noir::encoder::compute_program_hash_sha256(&c.prototypes);
+        let program_hash =
+            crate::compiler::program_hash::compute_program_hash_sha256(&c.prototypes);
         Ok(super::proto::CompiledProgram {
             prototypes: c.prototypes,
             program_hash,
@@ -1135,13 +1136,14 @@ impl Compiler {
         }
 
         // Check for indirect tool.call used as a regular call target.
-        if let Expr::Field(inner, field_name, span) = call.func.as_ref() {
-            if is_tool_ref(inner) && field_name == "call" {
-                // tool.call being called as a function reference — this is the
-                // direct tool.call() form but without being caught by is_tool_call
-                // (which would have returned true already).  Shouldn't reach here.
-                return Err(CompileError::IndirectToolCall { line: span.line });
-            }
+        if let Expr::Field(inner, field_name, span) = call.func.as_ref()
+            && is_tool_ref(inner)
+            && field_name == "call"
+        {
+            // tool.call being called as a function reference — this is the
+            // direct tool.call() form but without being caught by is_tool_call
+            // (which would have returned true already).  Shouldn't reach here.
+            return Err(CompileError::IndirectToolCall { line: span.line });
         }
 
         // Normal call.

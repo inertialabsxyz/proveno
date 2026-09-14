@@ -469,10 +469,7 @@ impl Parser {
     fn parse_binop(&mut self, min_prec: u8) -> Result<Expr, ParseError> {
         let mut left = self.parse_unop()?;
 
-        loop {
-            let Some((op, prec, right_assoc)) = self.peek_binop() else {
-                break;
-            };
+        while let Some((op, prec, right_assoc)) = self.peek_binop() {
             if prec < min_prec {
                 break;
             }
@@ -767,20 +764,19 @@ impl Parser {
         }
 
         // `name = expr` — only if next-next is `=`
-        if let Token::Ident(name) = self.peek().token.clone() {
-            if let Some(next) = self.peek2() {
-                if next.token == Token::Assign {
-                    let name_span = self.advance().span; // consume name
-                    self.advance(); // consume `=`
-                    let value = self.parse_expr()?;
-                    return Ok(TableField::NamedKey {
-                        name,
-                        name_span,
-                        value,
-                        span,
-                    });
-                }
-            }
+        if let Token::Ident(name) = self.peek().token.clone()
+            && let Some(next) = self.peek2()
+            && next.token == Token::Assign
+        {
+            let name_span = self.advance().span; // consume name
+            self.advance(); // consume `=`
+            let value = self.parse_expr()?;
+            return Ok(TableField::NamedKey {
+                name,
+                name_span,
+                value,
+                span,
+            });
         }
 
         // Positional

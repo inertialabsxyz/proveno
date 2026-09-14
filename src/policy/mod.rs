@@ -7,6 +7,10 @@
 //! See `docs/canonical-serialization.md` for the byte-exact hash format.
 
 pub mod canonical;
+pub mod guest;
+/// Host-side enforcement. Needs `OraclePolicy`, which needs `serde_json`.
+#[cfg(feature = "std")]
+pub mod host;
 
 /// The `no_std` half of the policy, shared with the zkVM guest.
 ///
@@ -14,6 +18,9 @@ pub mod canonical;
 /// use them without `std`; they are re-exported here so host code can keep
 /// referring to `policy::TlsRequirement`.
 pub use canonical::{PolicyParseError, PolicyView, TlsRequirement, extract_domain, is_http_tool};
+pub use guest::PolicyEnforcingHost;
+#[cfg(feature = "std")]
+pub use host::OraclePolicyHost;
 
 #[cfg(feature = "std")]
 pub mod profiles;

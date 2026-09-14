@@ -78,7 +78,61 @@ is the first consumer that proves the boundary is real.
 
 ---
 
-## Stage 0: decontaminate in place
+## Stage 0: decontaminate in place — **done**
+
+Landed on `refactor/core-app-separation`. `make check` is green at every commit
+from `84dd1b2` onward, and `make test-prove` passes all 7 Noir prove/verify tests
+at the tip, which is what confirms the program hash and ISA encoding are
+unchanged end to end through the real circuit.
+
+| Commit | Step |
+|---|---|
+| `349317f` | `fix(parser)`: prerequisite, see below |
+| `84dd1b2` | `style(repo)`: prerequisite, see below |
+| `4202a5c` | S0.1 workspace.dependencies |
+| `037f741` | S0.2 + S0.3 policy enforcement into host wrappers |
+| `fa0126e` | S0.4 program-hash out of the noir module |
+| `11a78cb` | S0.5 opaque DryRunResult attestations |
+| `7e3498a` | S0.6 src/noir -> src/isa |
+| `2adcfa0` | S0.7 DemoHost binary -> examples |
+| `3535b4c` | S0.8 drop tls from default features |
+
+End state: `parser`, `compiler`, `bytecode`, `types`, `vm`, `host` and `isa`
+contain **zero** references to `policy`, `tls` or `noir`. The app-bound modules
+point only inward (`policy -> types`, `tls -> host`, `noir -> compiler, isa`,
+`zkvm -> host, policy`).
+
+### Deviations from the plan as written
+
+- **S0.2 and S0.3 were one commit.** Removing `Vm::new_with_policy` without also
+  removing `ToolRegistry::with_policy` leaves no way to construct a
+  policy-carrying VM, so the intermediate state does not build.
+- **`src/host/policy_host.rs` moved to `src/policy/guest.rs`.** Not in the plan,
+  but without it `host/` still contained a file that was pure policy
+  enforcement, so the edge was not really cut.
+- **Two prerequisite commits.** `make check` was already failing on `main` with
+  44 clippy lints under clippy 1.98, so nothing could be committed through the
+  gate. One of those lints (`match_overlapping_arm`) turned out to be a real
+  bug: `b'0' => Ok(0)` sat ahead of `b'0'..=b'9'` in the lexer's escape
+  handling, so `"\012"` lexed as NUL followed by the literal bytes `1` and `2`
+  instead of the single byte 12. Fixed with a regression test.
+- **`make test-tls` added and wired into `make check`.** S0.8 would otherwise
+  have silently dropped `tests/tls.rs` from the gate, which is exactly the
+  coverage-shrinks-silently risk listed below.
+- **`TlsAttestationRecord::to_attestation_bytes` added** as the encoder at the
+  boundary S0.5 created.
+
+### Notes for whoever picks this up
+
+- `CLAUDE.md` cites a test `poseidon_program_hash_does_not_cover_constants_known_gap`
+  in `src/noir/encoder.rs`. It does not exist anywhere in the repo. The known gap
+  it describes is real and still open; the test is not.
+- `make lint` runs plain `cargo clippy`, not `--all-targets`, so lints in
+  `tests/*.rs` are still not gated.
+- `CLAUDE.md` and the crate table need updating for `src/isa/`, the lib-only core
+  package, and the narrowed default feature set.
+
+### The steps as originally planned
 
 Each of these is one commit in this repository, with `make check` green before it lands.
 Nothing moves repositories yet, and every step is independently reversible. This is the

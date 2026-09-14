@@ -36,6 +36,7 @@ impl MockHost {
         self.responses.push(Ok(t));
     }
 
+    #[allow(dead_code)] // counterpart to add_ok; kept so the mock stays symmetric
     fn add_err(&mut self, msg: &str) {
         self.responses.push(Err(msg.to_owned()));
     }

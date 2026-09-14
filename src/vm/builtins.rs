@@ -154,7 +154,7 @@ fn require_table(
     fname: &str,
 ) -> Result<Rc<RefCell<LuaTable>>, VmError> {
     match require_arg(args, idx, fname)? {
-        LuaValue::Table(t) => Ok(Rc::clone(&t)),
+        LuaValue::Table(t) => Ok(Rc::clone(t)),
         other => Err(VmError::TypeError(format!(
             "{}: expected table, got {}",
             fname,
@@ -184,7 +184,7 @@ fn lua_str_idx(i: i64, len: usize) -> usize {
     } else {
         // Negative: -1 = last char, -2 = second to last, etc.
         let abs = (-i) as usize;
-        if abs > len { 0 } else { len - abs }
+        len.saturating_sub(abs)
     }
 }
 
@@ -750,7 +750,7 @@ fn table_insert(
         let result = t
             .borrow_mut()
             .rawset_tracked(LuaKey::Integer(k + 1), v)
-            .map_err(|e| VmError::from(e))?;
+            .map_err(VmError::from)?;
         charge_rawset_result(result, old_cap, &t, mem)?;
     }
 
@@ -759,7 +759,7 @@ fn table_insert(
     let result = t
         .borrow_mut()
         .rawset_tracked(LuaKey::Integer(pos), value)
-        .map_err(|e| VmError::from(e))?;
+        .map_err(VmError::from)?;
     charge_rawset_result(result, old_cap, &t, mem)?;
 
     Ok(vec![])
@@ -801,7 +801,7 @@ fn table_remove(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>, 
             .unwrap_or(LuaValue::Nil);
         t.borrow_mut()
             .rawset(LuaKey::Integer(k), v)
-            .map_err(|e| VmError::from(e))?;
+            .map_err(VmError::from)?;
     }
 
     // Remove last slot.
@@ -921,7 +921,7 @@ fn table_move(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>, Vm
         let dest_k = t_pos + idx as i64;
         a2.borrow_mut()
             .rawset(LuaKey::Integer(dest_k), v)
-            .map_err(|e| VmError::from(e))?;
+            .map_err(VmError::from)?;
     }
 
     if args.len() >= 5 {
@@ -969,13 +969,13 @@ where
     for (i, v) in arr.into_iter().enumerate() {
         t.borrow_mut()
             .rawset(LuaKey::Integer((i + 1) as i64), v)
-            .map_err(|e| VmError::from(e))?;
+            .map_err(VmError::from)?;
     }
 
     Ok(())
 }
 
-fn merge_sort_slice<F>(arr: &mut Vec<LuaValue>, compare: &mut F) -> Result<(), VmError>
+fn merge_sort_slice<F>(arr: &mut [LuaValue], compare: &mut F) -> Result<(), VmError>
 where
     F: FnMut(&LuaValue, &LuaValue) -> Result<bool, VmError>,
 {
@@ -1247,9 +1247,7 @@ impl<'a> JsonParser<'a> {
                 }
             }
         }
-        self.mem
-            .track_alloc(alloc_size::string(buf.len()))
-            .map_err(|e| e)?;
+        self.mem.track_alloc(alloc_size::string(buf.len()))?;
         Ok(LuaValue::String(LuaString::from_bytes(&buf)))
     }
 
@@ -1356,7 +1354,7 @@ impl<'a> JsonParser<'a> {
             let rs = t
                 .borrow_mut()
                 .rawset_tracked(LuaKey::Integer(idx), v)
-                .map_err(|e| VmError::from(e))?;
+                .map_err(VmError::from)?;
             charge_rawset_result(rs, old_cap, &t, self.mem)?;
             idx += 1;
             self.skip_ws();
@@ -1404,7 +1402,7 @@ impl<'a> JsonParser<'a> {
             let rs = t
                 .borrow_mut()
                 .rawset_tracked(key, v)
-                .map_err(|e| VmError::from(e))?;
+                .map_err(VmError::from)?;
             charge_rawset_result(rs, old_cap, &t, self.mem)?;
             self.skip_ws();
             match self.peek() {
@@ -2290,7 +2288,7 @@ mod tests {
     #[test]
     fn table_sort_merge_sort_integers() {
         let t = make_table();
-        let data = vec![3i64, 1, 4, 1, 5, 9, 2, 6];
+        let data = [3i64, 1, 4, 1, 5, 9, 2, 6];
         for (i, &v) in data.iter().enumerate() {
             t.borrow_mut()
                 .rawset(LuaKey::Integer((i + 1) as i64), int(v))
@@ -2301,7 +2299,7 @@ mod tests {
             Ok(a.lua_cmp(b).map(|o| o.is_lt()).unwrap_or(false))
         })
         .unwrap();
-        let expected = vec![1, 1, 2, 3, 4, 5, 6, 9];
+        let expected = [1, 1, 2, 3, 4, 5, 6, 9];
         for (i, &v) in expected.iter().enumerate() {
             assert_eq!(
                 t.borrow().get(&LuaKey::Integer((i + 1) as i64)),
@@ -2563,7 +2561,7 @@ mod tests {
         let mut g = gas();
         let result = call_builtin(
             BuiltinId::JsonDecode,
-            &[input.clone()],
+            core::slice::from_ref(&input),
             &mut g,
             &mut tiny_mem,
             &mut logs(),

@@ -209,7 +209,7 @@ fn test_break_inside_while() {
         .iter()
         .filter(|i| matches!(i, Instruction::Jmp(_)))
         .collect();
-    assert!(jmps.len() >= 1);
+    assert!(!jmps.is_empty());
 }
 
 #[test]

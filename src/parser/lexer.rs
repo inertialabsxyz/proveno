@@ -378,9 +378,7 @@ impl<'src> Lexer<'src> {
                     // Not a close; put back into buf
                     if !discard {
                         buf.push(b']');
-                        for _ in 0..eq {
-                            buf.push(b'=');
-                        }
+                        buf.extend(core::iter::repeat_n(b'=', eq));
                     }
                 }
             } else {
@@ -764,9 +762,7 @@ impl<'src> Lexer<'src> {
                     return Ok(buf);
                 } else {
                     buf.push(b']');
-                    for _ in 0..eq {
-                        buf.push(b'=');
-                    }
+                    buf.extend(core::iter::repeat_n(b'=', eq));
                 }
             } else {
                 buf.push(c);

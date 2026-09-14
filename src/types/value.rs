@@ -77,6 +77,8 @@ impl LuaString {
         LuaString(Arc::from(bytes))
     }
 
+    // Infallible, so it cannot implement `FromStr`, which requires a `Result`.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         LuaString(Arc::from(s.as_bytes()))
     }
@@ -202,7 +204,7 @@ impl LuaValue {
             LuaValue::String(s) => String::from_utf8_lossy(s.as_bytes())
                 .trim()
                 .parse()
-                .map_or(LuaValue::Nil, |n| LuaValue::Integer(n)),
+                .map_or(LuaValue::Nil, LuaValue::Integer),
             _ => LuaValue::Nil,
         }
     }

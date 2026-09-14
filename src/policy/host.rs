@@ -14,8 +14,11 @@
 use alloc::{format, string::String, vec::Vec};
 
 use crate::{
-    host::{canonicalize::canonical_serialize_table, tool_registry::get_url_from_args},
-    policy::{OraclePolicy, canonical::is_http_tool},
+    host::canonicalize::canonical_serialize_table,
+    policy::{
+        OraclePolicy,
+        canonical::{get_url_from_args, is_http_tool},
+    },
     types::table::LuaTable,
     vm::engine::HostInterface,
 };

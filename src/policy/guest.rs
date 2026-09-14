@@ -21,8 +21,7 @@
 use alloc::{format, string::String, vec::Vec};
 
 use crate::{
-    host::tool_registry::get_url_from_args,
-    policy::canonical::{PolicyView, is_http_tool},
+    policy::canonical::{PolicyView, get_url_from_args, is_http_tool},
     types::table::LuaTable,
     vm::engine::HostInterface,
 };

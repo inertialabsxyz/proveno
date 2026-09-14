@@ -4,9 +4,6 @@
 //! (`policy::OraclePolicyHost` host-side, `policy::PolicyEnforcingHost`
 //! in the guest) so this module stays independent of `policy`.
 
-use alloc::string::String;
-
-use crate::types::table::LuaKey;
 use crate::{
     host::{
         canonicalize::{CanonError, canonical_serialize_table},
@@ -136,19 +133,6 @@ impl<H: HostInterface> ToolRegistry<H> {
                 Err(VmError::ToolError(msg))
             }
         }
-    }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Extract the `url` string from a LuaTable args argument.
-/// Shared with `PolicyEnforcingHost` so host-side and guest-side enforcement
-/// read the URL out of a call the same way.
-pub(crate) fn get_url_from_args(args: &LuaTable) -> Option<String> {
-    let key = LuaKey::String(LuaString::from_str("url"));
-    match args.get(&key) {
-        Some(LuaValue::String(s)) => Some(String::from_utf8_lossy(s.as_bytes()).into_owned()),
-        _ => None,
     }
 }
 

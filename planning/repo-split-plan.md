@@ -204,6 +204,64 @@ asks only for `zkvm` or `serde` still pulls p256, p384, x509-cert, webpki-roots 
 
 ## Stage 1: the split
 
+### Boundary validated by dry run
+
+Before any history surgery, both boundaries were checked by assembling throwaway
+trees and running the gate against them. Both pass.
+
+**Core alone** (`parser`, `compiler`, `bytecode`, `types`, `vm`, `host`, `isa`,
+plus `proveno-compiler`), with `policy`, `tls`, `noir` and `zkvm` deleted:
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | pass |
+| `cargo clippy -- -D warnings` | pass |
+| `cargo test` | pass, 667 tests |
+| `--no-default-features` build | pass |
+| `--no-default-features --features std` | pass |
+| `program_hash` of `examples/simple.lua` | `2cad63a185…`, identical to the monorepo |
+
+Dependency tree: **245 crates** default, **22** with no default features. The
+22-entry figure is the one `CLAUDE.md` cites as the target for zkVM guest builds.
+
+This dry run found one real defect, fixed in `6015f76`: `get_url_from_args` sat
+in `host/tool_registry.rs` but only the policy wrappers called it, so it became
+dead code the moment they were removed and failed `clippy -D warnings`. It now
+lives in `policy::canonical`.
+
+**The zk layer as a separate crate** (`policy`, `zkvm`, `noir`) depending on core:
+
+| Check | Result |
+|---|---|
+| build with `std,serde,zkvm` | pass |
+| `cargo clippy -D warnings` | pass |
+| `cargo test` | pass, 92 tests |
+| zkVM guest config (`--no-default-features --features zkvm,serde`) | pass, 34 crates |
+
+The only mechanical work was rewriting `crate::{host,types,vm,compiler,isa}` to
+`proveno::…`, including splitting grouped `use crate::{…}` statements that mix
+core and local modules. Seven files.
+
+### Feature mapping for the zk crate
+
+```toml
+[features]
+default  = ["std", "poseidon"]
+std      = ["dep:serde_json", "proveno/std"]
+serde    = ["dep:serde", "proveno/serde"]
+zkvm     = []
+poseidon = ["proveno/poseidon"]
+
+[dependencies]
+proveno = { git = "…", tag = "v0.2.0", default-features = false }
+```
+
+`default-features = false` on the core dependency is load-bearing for the same
+reason it is on `proveno-openvm` today.
+
+### Mechanics
+
+
 Preserve history with `git subtree split` (or `git filter-repo` for the
 multi-directory sets), so blame survives in each repository.
 

@@ -94,8 +94,10 @@ All checks run **inside the OpenVM guest** (not just in the prover host):
 1. The prover host captures the raw certificate chain DER bytes and the request
    hostname during the HTTPS connection, storing them in
    `TlsAttestationRecord.cert_chain_der` and `TlsAttestationRecord.hostname`.
-2. These are passed to the guest as part of `DryRunResult.tls_attestations`
-   inside the `OpenVMInput`.
+2. These are passed to the guest as part of `DryRunResult.attestations` inside
+   the `OpenVMInput`. That field is `Vec<Vec<u8>>` — opaque bytes, so `zkvm`
+   does not depend on `tls`. The TLS producer encodes each record at the
+   boundary via `TlsAttestationRecord::to_attestation_bytes`.
 3. The guest calls `reverify_attestations()` which independently:
    - Runs `verify_p256_chain()` against the embedded Mozilla roots.
    - Checks that the leaf cert's SAN extension covers the supplied hostname.

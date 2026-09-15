@@ -50,7 +50,9 @@ it does not authenticate them.**
 ## Layering
 
 ```
-proveno-agent ──> proveno-zk ──> proveno-core
+proveno-agent ───> proveno-zk ───> proveno-core
+                                        ^
+proveno-gateway ────────────────────────┘
 ```
 
 **proveno-core** is the runtime and nothing else: parser, compiler, bytecode
@@ -65,6 +67,16 @@ consumer.
 
 **proveno-agent** is how a task becomes an execution: the LLM orchestrator, the
 demo server, and the TLS provenance provider.
+
+**proveno-gateway** is an application of the runtime, not a new identity for
+proveno. It is an MCP server whose one tool runs an agent-written Lua program;
+every tool call the program makes is schema- and policy-checked, has its
+credential injected by the gateway, is dispatched to a downstream MCP server,
+and is recorded in a signed trace that replays bit-for-bit. It never calls a
+model: it receives programs, not tasks. It depends on proveno-core only. Its
+trace is built on core's transcript and oracle tape, so it is already the
+witness a proof would consume, but proving is not in its scope yet. The spec
+is `planning/proveno-gateway-spec.md`.
 
 ## Two commitment schemes
 

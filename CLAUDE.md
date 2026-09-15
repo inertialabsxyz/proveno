@@ -10,11 +10,13 @@ overview and the cross-cutting documents that belong to no single crate.
 | [proveno-core](https://github.com/inertialabsxyz/proveno-core) | Runtime: parser, compiler, bytecode, VM, host, ISA, record/replay | `make check` |
 | [proveno-zk](https://github.com/inertialabsxyz/proveno-zk) | Proving: policy, commitments, Noir circuit, OpenVM guest, contracts | `make check`, then `make test-prove` before a PR |
 | [proveno-agent](https://github.com/inertialabsxyz/proveno-agent) | Agent: LLM orchestrator, demo server, TLS provenance | `make check` |
+| [proveno-gateway](https://github.com/inertialabsxyz/proveno-gateway) | Gateway: MCP server and client, host policy, signed trace, replay | `make check` |
 
 Dependencies point strictly inward, by git tag:
-`proveno-agent -> proveno-zk -> proveno-core`.
+`proveno-agent -> proveno-zk -> proveno-core` and
+`proveno-gateway -> proveno-core`.
 
-If a task involves code, it belongs in one of those three. Work there, not here.
+If a task involves code, it belongs in one of those four. Work there, not here.
 
 ## What changes here
 
@@ -23,6 +25,8 @@ If a task involves code, it belongs in one of those three. Work there, not here.
   known gaps.
 - `docs/trust-model.md` — where the guarantee can break.
 - `README.md` — the map.
+- `planning/proveno-gateway-spec.md` — the gateway prototype spec, held here
+  until proveno-gateway has settled. Subordinate to the architecture document.
 
 ## Rules for editing these documents
 

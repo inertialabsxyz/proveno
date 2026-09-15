@@ -9,7 +9,7 @@ the result. Every tool call is recorded in a transcript that can be replayed
 bit-for-bit.
 
 This repository is the **umbrella**: the project overview and the cross-cutting
-documents that belong to no single crate. The code lives in three repositories.
+documents that belong to no single crate. The code lives in four repositories.
 
 ## The repositories
 
@@ -18,12 +18,15 @@ documents that belong to no single crate. The code lives in three repositories.
 | [proveno-core](https://github.com/inertialabsxyz/proveno-core) | The runtime: parser, compiler, bytecode verifier, VM, host, record/replay. `no_std`-capable, no network, no proving. | — |
 | [proveno-zk](https://github.com/inertialabsxyz/proveno-zk) | The proving layer: execution policy, public-input commitments, the Noir circuit and the OpenVM guest, the on-chain verifier and consumer contracts. | proveno-core |
 | [proveno-agent](https://github.com/inertialabsxyz/proveno-agent) | The agent layer: an LLM orchestrator that writes Lua for a natural-language task, runs it, and can prove the result. Plus a demo server and a TLS provenance provider. | proveno-core, proveno-zk |
+| [proveno-gateway](https://github.com/inertialabsxyz/proveno-gateway) | An MCP gateway: agents submit Lua programs, and every tool call is policy-checked, credential-injected, dispatched to downstream MCP servers and recorded in a signed, replayable trace. Makes no model calls. Prototype; the spec is in [planning](planning/proveno-gateway-spec.md). | proveno-core |
 
 Dependencies point strictly inward, by git tag. Core knows nothing about
 policy, proving or provenance.
 
 ```
-proveno-agent ──> proveno-zk ──> proveno-core
+proveno-agent ───> proveno-zk ───> proveno-core
+                                        ^
+proveno-gateway ────────────────────────┘
 ```
 
 ## Where to start
@@ -33,6 +36,8 @@ proveno-agent ──> proveno-zk ──> proveno-core
 - **Changing a circuit, a commitment, the execution policy or a contract** →
   proveno-zk. `make check`, then `make test-prove` before opening a PR.
 - **Changing how tasks are authored, run or demonstrated** → proveno-agent.
+- **Changing how agents submit programs over MCP, the gateway policy, or the
+  signed trace** → proveno-gateway. `make check` is the gate.
 
 ## Documents here
 
@@ -42,6 +47,8 @@ proveno-agent ──> proveno-zk ──> proveno-core
   honestly, each with a category and a mitigation.
 - [Canonical serialization](https://github.com/inertialabsxyz/proveno-core/blob/main/docs/canonical-serialization.md)
   lives in core, because the algorithm is core's.
+- [proveno-gateway spec](planning/proveno-gateway-spec.md): the prototype,
+  kept here until the repository has settled.
 
 ## History
 

@@ -1,9 +1,0 @@
-{
-  "script": "local user = tool.call(\"get_user\", {user_id = \"u42\"})\nlocal orders = tool.call(\"get_orders\", {user_id = user.id})\nlocal total = 0\nfor i = 1, #orders.orders do\n    total = total + orders.orders[i].amount\nend\nreturn json.encode({name = user.name, order_total = total})",
-  "logs": [],
-  "return_value": "{\"name\":\"Alice Chen\",\"order_total\":14850}",
-  "transcript": [
-    {"seq": 0, "tool": "get_user",   "args": {"user_id": "u42"}, "status": "ok", "response_bytes": 87},
-    {"seq": 1, "tool": "get_orders", "args": {"user_id": "u42"}, "status": "ok", "response_bytes": 140}
-  ]
-}

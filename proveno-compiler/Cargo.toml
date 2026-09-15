@@ -1,8 +1,0 @@
-[package]
-name = "proveno-compiler"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-proveno = {path = "../", features=["serde"]}
-serde_json.workspace = true

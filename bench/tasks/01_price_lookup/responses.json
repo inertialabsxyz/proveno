@@ -1,5 +1,0 @@
-[
-  {"tool": "get_price", "args": {"item": "apple"},  "response": {"item": "apple",  "price": 120, "currency": "USD", "in_stock": true}},
-  {"tool": "get_price", "args": {"item": "banana"}, "response": {"item": "banana", "price":  45, "currency": "USD", "in_stock": true}},
-  {"tool": "get_price", "args": {"item": "cherry"}, "response": {"item": "cherry", "price": 310, "currency": "USD", "in_stock": false}}
-]

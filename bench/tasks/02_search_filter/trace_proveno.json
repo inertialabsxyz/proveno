@@ -1,8 +1,0 @@
-{
-  "script": "local r = tool.call(\"search_products\", {query = \"keyboard\"})\nlocal electronics = {}\nfor i = 1, #r.results do\n    local p = r.results[i]\n    if p.category == \"electronics\" then\n        table.insert(electronics, {name = p.name, price = p.price})\n    end\nend\nreturn json.encode(electronics)",
-  "logs": [],
-  "return_value": "[{\"name\":\"Mechanical Keyboard\",\"price\":8900},{\"name\":\"Wireless Keyboard\",\"price\":4500},{\"name\":\"Ergonomic Keyboard\",\"price\":12000}]",
-  "transcript": [
-    {"seq": 0, "tool": "search_products", "args": {"query": "keyboard"}, "status": "ok", "response_bytes": 312}
-  ]
-}

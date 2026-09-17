@@ -2,11 +2,12 @@
 
 Proveno runs **verifiable tasks**: small programs, often LLM-authored, written
 in plain Lua. A task is compiled to bytecode and executed inside a
-deterministic, sandboxed, bounded interpreter. A ZK proof attests that this
-exact program ran over these exact inputs and produced this exact output, and a
-verifier — off-chain, or a smart contract on-chain — checks it before acting on
-the result. Every tool call is recorded in a transcript that can be replayed
-bit-for-bit.
+deterministic, sandboxed, bounded interpreter. Every tool call is recorded in a
+transcript that replays exactly. On OpenVM, the canonical proving backend, a ZK
+proof attests that the interpreter re-executed this exact program over these
+exact inputs and produced this output; verification is off-chain today, and
+on-chain verification comes next. Proveno binds provenance attestations, it
+does not authenticate them, and no attestation provider is working yet.
 
 This repository is the **umbrella**: the project overview and the cross-cutting
 documents that belong to no single crate. The code lives in four repositories.
@@ -16,8 +17,8 @@ documents that belong to no single crate. The code lives in four repositories.
 | Repository | What it is | Depends on |
 |---|---|---|
 | [proveno-core](https://github.com/inertialabsxyz/proveno-core) | The runtime: parser, compiler, bytecode verifier, VM, host, record/replay. `no_std`-capable, no network, no proving. | — |
-| [proveno-zk](https://github.com/inertialabsxyz/proveno-zk) | The proving layer: execution policy, public-input commitments, the Noir circuit and the OpenVM guest, the on-chain verifier and consumer contracts. | proveno-core |
-| [proveno-agent](https://github.com/inertialabsxyz/proveno-agent) | The agent layer: an LLM orchestrator that writes Lua for a natural-language task, runs it, and can prove the result. Plus a demo server and a TLS provenance provider. | proveno-core, proveno-zk |
+| [proveno-zk](https://github.com/inertialabsxyz/proveno-zk) | The proving layer: execution policy, public-input commitments, the OpenVM guest (canonical), and the Noir circuit and its Solidity contracts (in development). | proveno-core |
+| [proveno-agent](https://github.com/inertialabsxyz/proveno-agent) | The agent layer: an LLM orchestrator that writes Lua for a natural-language task, runs it, and can prove the result. Plus a demo server and TLS certificate-chain capture (not yet a working provenance provider). | proveno-core, proveno-zk |
 | [proveno-gateway](https://github.com/inertialabsxyz/proveno-gateway) | An MCP gateway: agents submit Lua programs, and every tool call is policy-checked, credential-injected, dispatched to downstream MCP servers and recorded in a signed, replayable trace. Makes no model calls. Prototype; the spec is in [planning](planning/proveno-gateway-spec.md). | proveno-core |
 
 Dependencies point strictly inward, by git tag. Core knows nothing about
@@ -25,8 +26,9 @@ policy, proving or provenance.
 
 ```
 proveno-agent ───> proveno-zk ───> proveno-core
-                                        ^
-proveno-gateway ────────────────────────┘
+      │                                 ^  ^
+      └─────────────────────────────────┘  │
+proveno-gateway ───────────────────────────┘
 ```
 
 ## Where to start
@@ -41,10 +43,11 @@ proveno-gateway ─────────────────────�
 
 ## Documents here
 
-- [Architecture](docs/architecture.md) — what proveno is and, just as
+- [Architecture](docs/architecture.md): what proveno is and, just as
   importantly, what it is not. Read this before arguing about scope.
-- [Trust model](docs/trust-model.md) — where the guarantee can break, named
-  honestly, each with a category and a mitigation.
+- [Trust model](docs/trust-model.md): where the guarantee can break, named
+  honestly, each with a category, its status in code, a mitigation and the
+  residual risk.
 - [Canonical serialization](https://github.com/inertialabsxyz/proveno-core/blob/main/docs/canonical-serialization.md)
   lives in core, because the algorithm is core's.
 - [proveno-gateway spec](planning/proveno-gateway-spec.md): the prototype,

@@ -206,21 +206,23 @@ by a test.
 memory limits, which determine whether an execution completes or aborts. Quota
 errors can be caught by `pcall`, so the config can also steer a program into its
 fallback branch. The gateway records the config in its signed trace header, which
-binds it to the operator's signature, not to a proof.
+binds it to the operator's signature, not to a proof. Tracked in [proveno-zk#3](https://github.com/inertialabsxyz/proveno-zk/issues/3).
 
 **Schema checks are host-side or absent.** `required_output_schema` and
 `schema_versions` are both committed in `policy_hash`. `schema_versions` is
 checked host-side only, as a structural type match, so a proof does not enforce
 it. `required_output_schema` is enforced nowhere. On Noir no policy field is
-enforced at all.
+enforced at all. Tracked in [proveno-zk#7](https://github.com/inertialabsxyz/proveno-zk/issues/7).
 
 **The output binds only an integer.** Tables, strings and booleans prove as `0`.
+Tracked in [proveno-zk#2](https://github.com/inertialabsxyz/proveno-zk/issues/2).
 
 **OpenVM verification is incomplete.** There is no on-chain verifier and no EVM
 proof. Off-chain, comparing the revealed digest with the recomputed commitments
 is not automated, and the guest's proving keys and executable commitment are not
-pinned, so a verifier has no canonical guest identity to check against.
+pinned, so a verifier has no canonical guest identity to check against. Tracked in
+[proveno-zk#8](https://github.com/inertialabsxyz/proveno-zk/issues/8) and [proveno-zk#14](https://github.com/inertialabsxyz/proveno-zk/issues/14).
 
 **Core version skew.** The proving stack and the gateway pin different core
 tags, so programs using newer builtins can run in the gateway but cannot yet be
-proved.
+proved. Tracked in [proveno-zk#1](https://github.com/inertialabsxyz/proveno-zk/pull/1).

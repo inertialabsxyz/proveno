@@ -90,6 +90,8 @@ does not catch a consistent forgery.
 and nothing should act on a Noir proof. A Noir circuit that re-executes the
 interpreter is possible future work.
 
+**Tracking.** [proveno-zk#16](https://github.com/inertialabsxyz/proveno-zk/issues/16).
+
 **Residual risk.** The Solidity verifier is immutable
 (`proveno-zk/contracts/src/ProvenoVerifier.sol`), so any deployment made from
 the current contracts keeps accepting such proofs until consumers move off it.
@@ -141,6 +143,8 @@ to a proof.
 **Mitigation.** Commit the config in the public inputs, or make quota errors
 uncatchable.
 
+**Tracking.** [proveno-zk#3](https://github.com/inertialabsxyz/proveno-zk/issues/3).
+
 **Residual risk.** None once fixed.
 
 ### 1.5 [S] Selective failure through fabricated error responses
@@ -153,6 +157,8 @@ and the program's fallback path is then proved faithfully.
 
 **Mitigation.** A policy option to fail closed on tool errors, and consumers that
 reject runs in which a required call errored.
+
+**Tracking.** [proveno-zk#10](https://github.com/inertialabsxyz/proveno-zk/issues/10).
 
 **Residual risk.** An executor can always withhold a response; the best outcome is
 that withholding yields no proof rather than a different result.
@@ -171,6 +177,8 @@ that the tape was fully consumed; request exclusion is in
 **Mitigation.** Require tape exhaustion in the guest. Commit requests, or require
 attestations that name the request.
 
+**Tracking.** [proveno-zk#9](https://github.com/inertialabsxyz/proveno-zk/issues/9).
+
 **Residual risk.** None for exhaustion. Request binding depends on provider
 formats.
 
@@ -183,6 +191,8 @@ non-integer result.
 **Status.** Open.
 
 **Mitigation.** Commit canonical output bytes.
+
+**Tracking.** [proveno-zk#2](https://github.com/inertialabsxyz/proveno-zk/issues/2).
 
 **Residual risk.** Consumers must decode the output with the right schema.
 
@@ -225,6 +235,8 @@ known guest.
 verification key and executable commitment, replace or remove
 `proveno-verifier`, and add an EVM wrapper with an on-chain verifier.
 
+**Tracking.** [proveno-zk#8](https://github.com/inertialabsxyz/proveno-zk/issues/8), [proveno-zk#12](https://github.com/inertialabsxyz/proveno-zk/issues/12), [proveno-zk#14](https://github.com/inertialabsxyz/proveno-zk/issues/14).
+
 **Residual risk.** Trust in the OpenVM proof system and its release process.
 
 ### 1.10 [S] Setup and verification key lifecycle
@@ -257,6 +269,8 @@ differently from the Noir public inputs. For an empty tape,
 applies.
 
 **Mitigation.** Add a scheme or version tag to the public inputs.
+
+**Tracking.** [proveno-zk#13](https://github.com/inertialabsxyz/proveno-zk/issues/13).
 
 **Residual risk.** None once fixed.
 
@@ -336,6 +350,8 @@ committed in `policy_hash` but never acted on
 **Mitigation.** Enforce "a blob must be present" in the guest. Verifying the blob
 remains the consumer's job.
 
+**Tracking.** [proveno-zk#11](https://github.com/inertialabsxyz/proveno-zk/issues/11).
+
 **Residual risk.** A present blob is not an authentic one (2.1).
 
 ### 2.4 [S] Response freshness and replay
@@ -412,6 +428,8 @@ is.
 **Mitigation.** Extend the policy beyond HTTP tools and enforce it on every
 proving path.
 
+**Tracking.** [proveno-zk#5](https://github.com/inertialabsxyz/proveno-zk/issues/5).
+
 **Residual risk.** The expressiveness of the policy language.
 
 ### 3.2 [F] Domain extraction and redirects
@@ -426,6 +444,8 @@ allowlist never sees the final host.
 
 **Mitigation.** A standards-compliant URL parser shared with the client, and
 clients that do not follow redirects.
+
+**Tracking.** [proveno-zk#6](https://github.com/inertialabsxyz/proveno-zk/issues/6).
 
 **Residual risk.** DNS-level indirection.
 
@@ -445,6 +465,8 @@ and the proof still verifies.
 **Mitigation.** Enforce bounded schema checks in the guest, or remove the fields
 from the hash. Version schemas explicitly.
 
+**Tracking.** [proveno-zk#7](https://github.com/inertialabsxyz/proveno-zk/issues/7).
+
 **Residual risk.** Operational churn when sources change.
 
 ### 3.4 [F] Sparse or mismatched policy inputs
@@ -458,6 +480,8 @@ mismatch produces a proof naming a policy the dry run did not use.
 
 **Mitigation.** One source of truth for the policy across dry run and proof, and a
 deny-by-default option.
+
+**Tracking.** [proveno-zk#5](https://github.com/inertialabsxyz/proveno-zk/issues/5).
 
 **Residual risk.** None once fixed.
 
@@ -475,6 +499,8 @@ is referenced by `gateway_policy_hash` in the trace
 **Mitigation.** Session state and cumulative caps (the spec already reserves the
 hook), lower bounds, and storing the rules file beside the trace.
 
+**Tracking.** [proveno-gateway#23](https://github.com/inertialabsxyz/proveno-gateway/issues/23).
+
 **Residual risk.** The expressiveness of the policy language.
 
 ### 3.6 [S] Credential injection
@@ -490,6 +516,8 @@ that echoes the credential in its response would put it into the transcript and
 the stored trace.
 
 **Mitigation.** Redact known credentials from responses before they are recorded.
+
+**Tracking.** [proveno-gateway#25](https://github.com/inertialabsxyz/proveno-gateway/issues/25).
 
 **Residual risk.** Downstream behaviour the gateway cannot observe.
 
@@ -511,6 +539,8 @@ rests on trusting the operator.
 rotation. Prove gateway runs on OpenVM: the trace already commits the SHA-256
 program hash and the tape an OpenVM proof would consume.
 
+**Tracking.** [proveno-gateway#26](https://github.com/inertialabsxyz/proveno-gateway/issues/26), [proveno-zk#4](https://github.com/inertialabsxyz/proveno-zk/issues/4).
+
 **Residual risk.** Until runs are proved, the operator is trusted. After, the
 operator is still trusted for which responses it fetched (1.5, 2.1).
 
@@ -524,6 +554,8 @@ compare error messages or check `vm_version`.
 
 **Mitigation.** Re-run the policy during replay against the stored rules file
 (3.5), and check the VM version.
+
+**Tracking.** [proveno-gateway#24](https://github.com/inertialabsxyz/proveno-gateway/issues/24).
 
 **Residual risk.** None once fixed.
 
@@ -595,6 +627,8 @@ they should not.
 sender; set policy per bounty. Carry these into the OpenVM on-chain verifier when
 it exists.
 
+**Tracking.** [proveno-zk#14](https://github.com/inertialabsxyz/proveno-zk/issues/14).
+
 **Residual risk.** Integrator mistakes.
 
 ### 6.2 [F] Stale documents mislead integrators
@@ -614,6 +648,8 @@ not hold.
 - `proveno-agent/docs/tls-attestation.md` describes in-guest re-verification.
 
 **Mitigation.** Correct or remove them. See the appendix.
+
+**Tracking.** [proveno-zk#16](https://github.com/inertialabsxyz/proveno-zk/issues/16).
 
 **Residual risk.** None once fixed.
 
@@ -662,6 +698,8 @@ not been measured.
 idle; GPU proving; proof aggregation. Target settlement and review workflows that
 tolerate tens of seconds.
 
+**Tracking.** [proveno-zk#15](https://github.com/inertialabsxyz/proveno-zk/issues/15).
+
 **Residual risk.** Sub-second proving of general execution is out of reach, which
 excludes real-time uses.
 
@@ -677,6 +715,8 @@ at 24,392 bytes, just under the 24,576-byte contract size limit (measured
 
 **Mitigation.** An OpenVM EVM wrapper with a measured gas cost; proof aggregation
 across tasks.
+
+**Tracking.** [proveno-zk#14](https://github.com/inertialabsxyz/proveno-zk/issues/14).
 
 **Residual risk.** The gas market, and the size of the OpenVM EVM wrapper, which
 is not yet known.
